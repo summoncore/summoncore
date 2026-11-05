@@ -1447,7 +1447,8 @@ add("the new race: only summons of Zennit count, ten a week, and a summon to his
             out.listed = W.Score(last)
         end)
         local f, s, l = out.friends, out.six, out.listed
-        local ok = f.group == 0 and f.zennit == W.RULES.headstart and f.winner == "zennit"
+        -- with no summons of him the race has not started, so nobody wins (Week.RULES.needsHim; this clock is past it)
+        local ok = f.group == 0 and f.zennit == W.RULES.headstart and f.winner == nil
             and s.counted == 10 and s.extra == 1 and s.group == 30 and s.winner == "group"
             and out.first and not out.sixth and out.enthusiasm and l.zennit == W.RULES.headstart + 3 and l.group == 30
         return ok, string.format("friends %d-%d, eleven: %d counted, %d extra, %d-%d, listed: Zennit %d, enthusiasm %s",
@@ -1490,7 +1491,8 @@ add("closing the Index: allowed after five answered, it travels to everyone, and
     return newRules(function()
         local W, z, a = ST.Week, newClient("Zennit"), newClient("Alpha")
         local ids = {}
-        for n = 1, 7 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
+        -- five summons before the close; the sixth and seventh come after it (he can only close once the latest is answered)
+        for n = 1, 5 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
         settle({ a, z })
         local start = W.Start(BASE + 961)
         local out = {}
@@ -1506,6 +1508,7 @@ add("closing the Index: allowed after five answered, it travels to everyone, and
             out.again = W.CloseTarget(start) -- once closed, it can't be closed again
             ST.Respond.Decide(ids[5], "accepted") -- a changed answer keeps the Index closed
         end)
+        for n = 6, 7 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
         settle({ a, z })
         local rz = with(z, function() return W.Score(start) end)
         local ra = with(a, function() return W.Score(start) end)
@@ -3390,6 +3393,112 @@ end)
 
 -- ===== [tests:RACE] the weekly race rules (0.29.0 review fixes) =====
 -- (new tests for this area go directly below this line)
+add("closing the Index: not while the latest summons filed waits for his answer, which counts as accepted (B2)", function()
+    return newRules(function()
+        local W, z = ST.Week, newClient("Zennit")
+        local out = {}
+        with(z, function()
+            local start = W.Start(BASE + 990)
+            for n = 1, 6 do
+                z.db.events["Alpha-" .. n] = { caster = "Alpha", target = "Zennit", assistants = {}, time = start + n, points = 3,
+                    kind = "zone" }
+            end
+            for n = 1, 5 do
+                z.db.events["Alpha-" .. n].response = { result = "accepted", zroll = 0, sroll = 0, time = start + 10 + n }
+            end
+            -- five answered and the sixth, the latest, still waiting: no close, and the sixth still counts
+            out.target = W.CloseTarget(start)
+            out.closed = ST.Respond.CloseIndex(start)
+            out.score = W.Score(start)
+            out.sixth = W.Counts(z.db.events["Alpha-6"])
+            -- once he answers it, he can close on it, and nothing filed before the close is lost
+            z.db.events["Alpha-6"].response = { result = "accepted", zroll = 0, sroll = 0, time = start + 20 }
+            out.after = W.CloseTarget(start)
+            out.closedAfter = ST.Respond.CloseIndex(start)
+            out.final = W.Score(start)
+        end)
+        local r, f = out.score, out.final
+        local ok = out.target == nil and out.closed == false and r.counted == 6 and r.group == 18 and out.sixth
+            and out.after == "Alpha-6" and out.closedAfter and f.closed and f.counted == 6 and f.extra == 0 and f.group == 18
+        return ok, string.format("target %s, closed %s, counted %d (group %d), sixth counts %s; then target %s, closed %s, counted %d",
+            tostring(out.target), tostring(out.closed), r.counted, r.group, tostring(out.sixth), tostring(out.after),
+            tostring(out.closedAfter), f.counted)
+    end)
+end)
+
+add("from 9 November 2026 a week with no summons of Zennit has no winner, however much friends summon each other (B3)", function()
+    return newRules(function()
+        local W, a = ST.Week, newClient("Alpha")
+        local saved = W.RULES.needsHim
+        local out = {}
+        local ok, err = pcall(with, a, function()
+            local this = W.Start()
+            local w1, w2 = this - 2 * 7 * 86400, this - 7 * 86400
+            -- two weeks ago: one summons of him, unanswered, 3 to his 2: the group's week
+            a.db.events["Alpha-1"] = { caster = "Alpha", target = "Zennit", assistants = {}, time = w1 + 3600, points = 3, kind = "zone" }
+            -- last week: nobody summoned him; Alpha summoned Bravo
+            a.db.events["Alpha-2"] = { caster = "Alpha", target = "Bravo", assistants = {}, time = w2 + 3600, points = 3, kind = "zone" }
+            local function look()
+                local r, s = W.Score(w2), W.Season()
+                return { winner = r.winner, off = W.IsOff(this), immune = (W.Immune(time())), zennit = s.zennit, group = s.group,
+                    said = W.Describe(r) }
+            end
+            W.RULES.needsHim = 0
+            out.new = look()
+            -- a week played before the rule keeps its result: his head start won it, and this week is his week off
+            W.RULES.needsHim = math.huge
+            out.old = look()
+        end)
+        W.RULES.needsHim = saved
+        if not ok then return false, "ERROR " .. tostring(err) end
+        local n, o = out.new, out.old
+        local good = n.winner == nil and not n.off and not n.immune and n.zennit == 0 and n.group == 1
+            and n.said:find("no winner", 1, true) and not n.said:find("won the week", 1, true)
+            and o.winner == "zennit" and o.off and o.immune and o.zennit == 1 and o.group == 1
+            and W.RaceNeedsHim(W.RULES.needsHim) and not W.RaceNeedsHim(W.RULES.needsHim - 7 * 86400)
+            and W.Start(W.RULES.needsHim) == W.RULES.needsHim
+        return good, string.format("from the rule: winner %s, off %s, season %d-%d, '%s'; before it: winner %s, off %s, season %d-%d",
+            tostring(n.winner), tostring(n.off), n.zennit, n.group, n.said, tostring(o.winner), tostring(o.off), o.zennit, o.group)
+    end)
+end)
+
+add("Week.Immune agrees with Week.IsOff: a season started or stopped this week is not his week off (B4)", function()
+    return newRules(function()
+        local W = ST.Week
+        local out = {}
+        local function client(mark)
+            local c = newClient("Alpha")
+            with(c, function()
+                local this = W.Start()
+                -- he won last week on the dice
+                c.db.events["Alpha-1"] = { caster = "Alpha", target = "Zennit", assistants = {}, time = this - 7 * 86400 + 3600,
+                    points = 3, kind = "zone", response = { result = "won", zroll = 90, sroll = 10, time = this - 7 * 86400 + 3700 } }
+                if mark then W.PutMark(mark, this + 600) end
+            end)
+            return c
+        end
+        local function look(c)
+            return with(c, function()
+                return { immune = (W.Immune(time())), off = W.IsOff(W.Start()), briefing = W.Briefing("Zennit", nil, nil) or "" }
+            end)
+        end
+        out.plain, out.started, out.stopped = look(client()), look(client("start")), look(client("stop"))
+        -- the old rules keep their warning: there a week off was only a word, and no mark changed it
+        local old = client("start")
+        W.RULES.from = math.huge
+        local ok, immune = pcall(with, old, function() return (W.Immune(time())) end)
+        W.RULES.from = 0
+        if not ok then return false, "ERROR " .. tostring(immune) end
+        out.old = immune
+        local p, s, t = out.plain, out.started, out.stopped
+        local good = p.immune and p.off and p.briefing:find("week off", 1, true)
+            and not s.immune and not s.off and not s.briefing:find("week off", 1, true)
+            and not t.immune and not t.off and not t.briefing:find("week off", 1, true)
+            and out.old == true
+        return good, string.format("no mark %s/%s, started %s/%s '%s', stopped %s/%s, old rules %s", tostring(p.immune), tostring(p.off),
+            tostring(s.immune), tostring(s.off), s.briefing, tostring(t.immune), tostring(t.off), tostring(out.old))
+    end)
+end)
 -- ===== [end tests:RACE] =====
 
 

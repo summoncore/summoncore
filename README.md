@@ -439,7 +439,9 @@ From the week of **Monday 5 October 2026** the group has to beat Zennit at his o
 numbers behind it, is in `design/lenses.md`):
 
 - **Only summons of Zennit count**, up to **10** of them each week. Any after that are logged as usual but "filed under
-  'enthusiasm'": the race ignores them. Summons of each other still count for the tally and badges.
+  'enthusiasm'": the race ignores them. Summons of each other still count for the tally and badges. From the week of
+  **Monday 9 November 2026**, they do not start the race either: a week in which nobody summoned him has no winner, as a
+  week with no summons at all has none (`Week.RULES.needsHim`; earlier weeks keep their results).
 - **The Index keeps the season close.** Zennit's edge on the dice (the +10) moves with the season's lead, worked out from
   the weeks before the current one. At a lead of two weekly wins it is **+5** for the side behind: his edge shrinks when
   he is ahead (to +5), and grows when the group is ahead (to +15). At three or more it moves by **10** (to +0, or +20);
