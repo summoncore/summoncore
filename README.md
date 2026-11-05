@@ -65,15 +65,15 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc feelings [on\|off]` | **The weekly question**: once a week, at the first login after a week with summons, the Index asks "How was last week?" with three buttons (Good fun / It was fine / Not for me); Zennit is asked "How was being summoned?" (Bring it on / Fine / Too much). Close it to skip; `off` stops it. Answers go only to Zennit's and the admin's clients (each client re-sends its own with its hello, so they catch up), where `/sc feelings` (and Tools > General > How it felt, for the admin) shows **counts per week, never names** |
 | `/sc panel` | Open the window on the Party tab |
 | `/sc log [n]` | Recent summons |
-| `/sc tally` | Cast, received and assisted counts and points per player, ranked by summons of Zennit this season (what the race counts), then points. The Party tab's Tally is the same list, with an "Of Zennit" column |
-| `/sc badges` | Badge list |
+| `/sc tally` | Cast, received and assisted counts and points per player, ranked by summons of him this season, then points. The Party tab's Tally is the same list, with an "Of Zennit" column |
+| `/sc badges` | Badge list (badges are kept per character: an alt earns its own) |
 | `/sc writ` | Arm a writ for your next ritual on Zennit (two a week): if he declines that summons in the game, it costs him its points. Again to withdraw it. It is also a **key binding** (Esc > Options > Key Bindings > AddOns > Summon Core: "Play a writ on your next summons of Zennit"), so it is one key in the middle of play; the binding (`Bindings.xml`) has never been tried in the client |
 | `/sc week copy` | Opens the same "Week:" line `/sc week say` would send, in the copy window, to paste where you choose (nothing is sent). It says why not under the old rules |
 | `/sc week say` | Tell the group (party or raid chat) where the week stands, in one line: the lead, his dice left, the last call. It uses `C_ChatInfo.SendChatMessage` (the global `SendChatMessage` is only a deprecation fallback on this client, kept as a last resort), which has never been tried under the 12.0 chat rules |
 | `/sc check` | Admin only. The live-client checklist (`design/verification.md`), also the Tools tab's Checks section (RUN AUTO, NEXT, PASS, FAIL, SKIP, TRACE, REPORT, COPY: the output box cannot be selected, so COPY opens its text in a window that can): `/sc check auto` runs the automatic checks, `/sc check <id>` gives the steps for the rest, `pass`/`fail`/`skip <id> [note]` records a result, `trace` shows what the summon prompt did, `report` opens a copyable report to send back. Some checks turn green on their own when they happen for real |
 | `/sc where` | Current map ID, subzone and how it scores |
 | `/sc places` | What a place is worth (a city 1, a zone 3, a dungeon entrance 5, a far-flung place 10) and every map ID in the table, checked against the game's own name for it; a wrong or missing one is flagged. The ritual briefing on Zennit also says what the place you stand in is worth |
-| `/sc undo` | Remove the newest summon you cast (earned badges are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
+| `/sc undo` | Remove the newest summon your client logged: usually the newest you cast, and on Zennit's client also one his client filed for a caster without the addon (earned badges are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
 | `/sc admin` | Admin only. What the game reports as this account's BattleTag, and whether it is the admin's or Zennit's |
 | `/sc reset [all]` | Wipe this client's summons, badges and story (it asks first). `all` is admin only: it asks everyone else to do the same |
 | `/sc season [start\|stop]` | Whether a season is running. `start` and `stop` are admin only (each asks first): `stop` ends the season in progress now, with no finale; `start` begins a new one, 0 to 0, from this week. Everyone's client hears of it, now or at its next hello. Also Tools > General > **The season** |
@@ -174,7 +174,7 @@ Placeholder values, meant to be argued about. Edit the tables at the top of `Sco
 A dungeon entrance sits inside an ordinary outdoor map, so it is matched by subzone. Stand at the spot and
 run `/sc where` to read the exact string. Points go to the caster only.
 
-Badges, named as the Index would (the Badges tab says what each takes): Entered in the Index (a first summons), Filed in Triplicate (ten), A Volume of Their Own (fifty), Admitted Below Stairs (a dungeon entrance), Beyond the Index's Jurisdiction (a far-flung place), Stamped in Five Places (five different maps), and four that come later and come from the log: Known to the Clerk (summoned him in four different weeks), Countersigned by Witnesses (helpers tipped a roll of yours), Paid in Full, No Receipt (your tab is clear) and Stamped to the Last Punch (used up a card). They are for the people who cast; helpers get titles, not badges.
+Badges, named as the Index would (the Badges tab says what each takes): Entered in the Index (a first summons), Filed in Triplicate (ten), A Volume of Their Own (fifty), Admitted Below Stairs (a dungeon entrance), Beyond the Index's Jurisdiction (a far-flung place), Stamped in Five Places (five different maps), and four that come later and come from the log: Known to the Clerk (summoned him in four different weeks), Countersigned by Witnesses (helpers tipped a roll of yours), Paid in Full, No Receipt (your tab is clear) and Stamped to the Last Punch (used up a card). They are for the people who cast; helpers get titles, not badges. Each character earns and keeps its own.
 
 ### Sync
 
@@ -198,8 +198,10 @@ Merge rules:
   Only the summoned can file one, and only a summons of himself.
 - A `B` is accepted only by whisper and only soon after you sent a `R` to that sender (the window renews with
   each batch message, so a long log still arrives whole).
-- A deleted summon stays deleted: only its caster can send the `T`, and a copy of it is refused afterwards.
-- Anything from before the last reset is refused.
+- A deleted summon stays deleted: only its caster can send the `T`, and a copy of it is refused afterwards (a reset keeps the
+  tombstones of summons made after its mark).
+- Anything from before the last reset is refused, and a client never files a summons at or before it (with a clock behind the
+  admin's, it is filed just after the mark).
 - Of two answers from Zennit for one summon, the later wins.
 - Points and kind are recomputed locally, never read from the wire.
 - Messages from a newer protocol major version are ignored.
@@ -299,8 +301,8 @@ Two things make it visible and countable:
 - **Summon cards, like a coffee card** (`Cards.lua`). A card is **prepaid silver**: N punches bought once at a price Zennit sets
   (`/sc card offer 5 200`: five punches for 200 silver, against 250 at the counter). Each time he asks for silver from the
   holder, **a punch pays it** at the card's price per punch and the Index says so ("Bo's card pays the 40 silver: a punch used, 3 left");
-  his popup's button reads "Take a punch (card: 3 left)". Cards are issued only by Zennit's client (`/sc card sell Bo`, or from the payment popup) and sent to
-  everyone (message `K`, with his hello and to anyone who asks for events), so a holder can see their balance in `/sc cards`.
+  his popup's button reads "Take a punch (card: 3 left)". Cards are issued only by Zennit's client (`/sc card sell Bo`, or from the payment popup; the name's case does not matter) and sent to
+  everyone (message `K`: with his hello, every card of anyone who still has a punch, used-up ones too; to anyone who asks for events, every card), so a holder can see their balance in `/sc cards`.
   **Punches are not stored anywhere:** they are counted from the summons he settled with a punch (an answer carrying the card flag),
   oldest card first, so every client agrees and nothing drifts. A reset clears the cards with the summons. The answer's flags digit gains
   a bit (4 = paid by a punch): older clients would read it as "closed the Index", so update everyone together.

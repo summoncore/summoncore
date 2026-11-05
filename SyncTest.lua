@@ -684,8 +684,9 @@ add("points only count for summons that land", function()
         tally = ST.Store.Tallies().Alpha
         stats = ST.Store.Stats("Alpha")
     end)
-    -- accepted, owed (the silver goes on a tab), paid, lost and the unanswered one land: 5 summons x 3 points
-    return tally.cast == 7 and tally.points == 15 and stats.cast == 5,
+    -- accepted, owed (the silver goes on a tab), paid, lost and the unanswered one land: 5 summons x 3 points, and only they
+    -- are counted as cast (README: points, tallies and badges only count summons that land)
+    return tally.cast == 5 and tally.points == 15 and stats.cast == 5,
         string.format("cast=%d points=%d landed=%d", tally.cast, tally.points, stats.cast)
 end)
 
@@ -3176,6 +3177,177 @@ end)
 
 -- ===== [tests:LOG] undo, cards, resets and tallies (0.29.0 review fixes) =====
 -- (new tests for this area go directly below this line)
+add("undo removes the newest summons this client wrote: a record Zennit's client filed for a caster is his to undo, not the caster's", function()
+    local z, b, c = newClient("Zennit"), newClient("Bravo"), newClient("Charlie")
+    for _, x in ipairs({ z, b, c }) do x.db.settings.zenitNames = { "Zennit" } end
+    local own = cast(b, 960, false, { target = "Charlie" })
+    -- Bravo cast this one without the addon running, so Zennit's client filed it (Respond.Witnessed: by = target = Zennit)
+    local filed = cast(z, 961, false, { caster = "Bravo", target = "Zennit", by = "Zennit", confirmed = false })
+    settle({ z, b, c })
+    local function count(x)
+        local n = 0
+        for _ in pairs(x.db.events) do n = n + 1 end
+        return n
+    end
+    local before = count(z) .. count(b) .. count(c)
+    local his = with(b, function() return Store.RemoveLast() end)
+    settle({ z, b, c })
+    local afterBravo = count(z) .. count(b) .. count(c)
+    local zennits = with(z, function() return Store.RemoveLast() end)
+    settle({ z, b, c })
+    local afterZennit = count(z) .. count(b) .. count(c)
+    local good = before == "222" and his and his.id == own and afterBravo == "111" and zennits and zennits.id == filed
+        and afterZennit == "000" and z.db.deleted and z.db.deleted[filed] ~= nil and b.db.deleted[filed] ~= nil
+    return good, string.format("before %s; Bravo's undo took %s (%s); Zennit's took %s (%s)", before, tostring(his and his.id),
+        afterBravo, tostring(zennits and zennits.id), afterZennit)
+end)
+
+add("a card sold to a name typed in lower case is the holder's: matched by name whatever the case, old cards included", function()
+    local C, out = ST.Cards, {}
+    local z, a = newClient("Zennit"), newClient("Alpha")
+    z.db.settings.zenitNames, a.db.settings.zenitNames = { "Zennit" }, { "Zennit" }
+    with(z, function()
+        out.card = C.Issue("bravo", 2, 100)
+        out.left = C.Left("Bravo")
+    end)
+    with(a, function()
+        -- a card an earlier version saved as typed, with one punch already used by Bravo's summons of Zennit
+        a.db.cards = { ["card-1"] = { id = "card-1", holder = "bravo", punches = 3, silver = 90, time = BASE } }
+        a.db.events["Bravo-1"] = { caster = "Bravo", target = "Zennit", assistants = {}, time = BASE + 10, points = 3, kind = "zone",
+            response = { result = "paid", zroll = 0, sroll = 0, time = BASE + 20, card = true } }
+        out.oldLeft, out.price, out.lines = C.Left("Bravo"), C.UnitPrice("Bravo"), table.concat(C.Lines("Bravo"), " ")
+        -- a card that arrives with a holder in lower case is kept the game's way
+        out.k = Sync.OnMessage("1~K~card-2|carol|4|100|" .. BASE, "PARTY", "Zennit")
+        out.carol = a.db.cards["card-2"] and a.db.cards["card-2"].holder
+        out.carolLeft = C.Left("Carol")
+    end)
+    local good = out.card and out.card.holder == "Bravo" and out.left == 2 and out.oldLeft == 2 and out.price == 30
+        and out.lines == "Bravo: 2 of 3 punches left, 1 already stamped." and out.k == "card" and out.carol == "Carol"
+        and out.carolLeft == 4
+    return good, string.format("sold to %s, %s left; old card %s left at %s each (%s); K holder %s, %s left",
+        tostring(out.card and out.card.holder), tostring(out.left), tostring(out.oldLeft), tostring(out.price), tostring(out.lines),
+        tostring(out.carol), tostring(out.carolLeft))
+end)
+
+add("used-up cards are sent again: a holder's every card goes with Zennit's hello, and every card to a client that asks", function()
+    local C = ST.Cards
+    local z, c, d = newClient("Zennit"), newClient("Charlie"), newClient("Dee")
+    local function punched(caster, i)
+        return { caster = caster, target = "Zennit", assistants = {}, time = BASE + 100 + i, points = 3, kind = "zone",
+            response = { result = "paid", zroll = 0, sroll = 0, time = BASE + 200, card = true } }
+    end
+    for _, x in ipairs({ z, c, d }) do
+        x.db.settings.zenitNames = { "Zennit" }
+        x.db.events = { ["Bravo-1"] = punched("Bravo", 1), ["Bravo-2"] = punched("Bravo", 2), ["Dora-3"] = punched("Dora", 3) }
+    end
+    -- Charlie and Dee were offline when these were sold
+    z.db.cards = {
+        ["card-1"] = { id = "card-1", holder = "Bravo", punches = 2, silver = 80, time = BASE + 1 },   -- used up
+        ["card-2"] = { id = "card-2", holder = "Bravo", punches = 5, silver = 200, time = BASE + 2 },
+        ["card-3"] = { id = "card-3", holder = "Dora", punches = 1, silver = 40, time = BASE + 3 },    -- used up, her only one
+    }
+    local function sent(x)
+        local n = 0
+        for _, m in ipairs(x.state.queue) do
+            if m.payload:match("^%d+~K~") then n = n + 1 end
+        end
+        return n
+    end
+    local hello = with(z, function()
+        Sync.SendCards()
+        return sent(z)
+    end)
+    settle({ z, c })
+    local asked = with(z, function()
+        Sync.SendCards("Dee")
+        return sent(z)
+    end)
+    settle({ z, d })
+    local cLeft, cUsed = with(c, function() return C.Left("Bravo"), C.Exhausted("Bravo") end)
+    local dCards = 0
+    for _ in pairs(d.db.cards or {}) do dCards = dCards + 1 end
+    local good = hello == 2 and cLeft == 5 and cUsed == 1 and asked == 3 and dCards == 3
+    return good, string.format("hello sent %d, Charlie: Bravo has %s left, %s used up; a request got %d, Dee holds %d",
+        hello, tostring(cLeft), tostring(cUsed), asked, dCards)
+end)
+
+add("tallies count only summons that land: cast, received and assisted, and his points still count the dice he won", function()
+    local a = newClient("Alpha")
+    cast(a, 965, true, { target = "Zennit", response = { result = "away", zroll = 0, sroll = 0, time = BASE + 5 } })
+    cast(a, 966, true, { target = "Zennit", response = { result = "declined", zroll = 0, sroll = 0, time = BASE + 5 } })
+    cast(a, 967, true, { target = "Zennit", response = { result = "won", zroll = 80, sroll = 20, time = BASE + 5 } })
+    cast(a, 968, true, { target = "Zennit", response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 5 } })
+    local t = with(a, function() return ST.Store.Tallies() end)
+    local good = t.Alpha.cast == 1 and t.Alpha.points == 3 and t.Zennit.received == 1 and t.Zennit.points == 3
+        and t.H1.assisted == 1 and t.H2.assisted == 1
+    return good, string.format("Alpha cast %d (%d pts), Zennit received %d (%d pts), H1 assisted %d", t.Alpha.cast, t.Alpha.points,
+        t.Zennit.received, t.Zennit.points, t.H1.assisted)
+end)
+
+add("badges are kept per character: an alt has none of its main's, and a character's old badges are kept without a word", function()
+    local a = newClient("Alpha")
+    local first, alt, again
+    with(a, function()
+        ST.Scoring.Badges() -- what logging in does (initDB)
+        first = select(3, Store.Add({ caster = "Alpha", target = "Bo", assistants = {}, time = BASE + 970, confirmed = true }, true))
+    end)
+    local altClient = { name = "Alphalt", out = {}, state = Sync.newState(), db = a.db } -- the same account's saved variables
+    with(altClient, function() alt = ST.Scoring.Badges() end)
+    -- a character with badges saved account-wide by an earlier version, and no entry of its own yet
+    local m = newClient("Mia")
+    m.db.badges = { ["first-summon"] = { earned = BASE } }
+    m.db.events["Mia-" .. (BASE + 971)] = { caster = "Mia", target = "Bo", assistants = {}, time = BASE + 971, confirmed = true }
+    local kept, announced = with(m, function() return ST.Scoring.Badges()["first-summon"], ST.Scoring.EvaluateBadges() end)
+    -- a reset clears them, and the next summons announces its badge again
+    with(a, function()
+        ST.Reset.Apply(BASE + 980)
+        again = select(3, Store.Add({ caster = "Alpha", target = "Bo", assistants = {}, time = BASE + 990, confirmed = true }, true))
+    end)
+    local good = first[1] == "Entered in the Index" and a.db.badgesBy.Alpha ~= nil and next(alt) == nil and kept ~= nil
+        and #announced == 0 and again[1] == "Entered in the Index"
+    return good, string.format("first summons: %s; the alt holds %s; old badge kept %s, announced %d; after a reset: %s",
+        tostring(first[1]), tostring(next(alt)), tostring(kept ~= nil), #announced, tostring(again and again[1]))
+end)
+
+add("a reset keeps the tombstones of summons made after its mark, so a deleted summons stays deleted", function()
+    local a = newClient("Alpha")
+    local early, late, late2 = "Alpha-" .. (BASE + 10), "Beta-" .. (BASE + 100), "Beta-" .. (BASE + 100) .. "-2"
+    a.db.deleted = { [early] = 1, [late] = 2, [late2] = 3 }
+    local back = with(a, function()
+        ST.Reset.Apply(BASE + 50)
+        local _, ev = Sync.Decode(Sync.Encode(late, { caster = "Beta", target = "Tgt", assistants = {}, time = BASE + 100,
+            wrote = BASE + 100, confirmed = true }))
+        return Sync.Merge(late, ev, "Gamma", false)
+    end)
+    local d = a.db.deleted or {}
+    local good = d[early] == nil and d[late] ~= nil and d[late2] ~= nil and back == "rejected:deleted"
+    return good, string.format("older dropped %s, later kept %s and %s; the deleted summons offered again: %s",
+        tostring(d[early] == nil), tostring(d[late] ~= nil), tostring(d[late2] ~= nil), tostring(back))
+end)
+
+add("a summons is never filed at or before the reset mark: a clock behind the admin's files it just after, and peers take it", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    a.db.resetAt, b.db.resetAt = BASE + 500, BASE + 500
+    local behind = cast(a, 400, false) -- the caster's clock says before the mark
+    local ahead = cast(a, 600, false)  -- and an ordinary one after it is left alone
+    settle({ a, b })
+    local ev = a.db.events[behind]
+    local good = behind == "Alpha-" .. (BASE + 501) and ev and ev.time == BASE + 501 and ev.wrote > BASE + 500
+        and b.db.events[behind] ~= nil and ahead == "Alpha-" .. (BASE + 600) and b.db.events[ahead] ~= nil
+    return good, string.format("filed as %s, Beta holds it %s; the later one %s", tostring(behind),
+        tostring(b.db.events[behind] ~= nil), tostring(ahead))
+end)
+
+add("a tombstone a peer sends is stamped with the wall clock, as the caster's own is", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    local id = cast(a, 975, false)
+    settle({ a, b })
+    with(a, function() Store.Remove(id) end)
+    settle({ a, b })
+    local mine, theirs = a.db.deleted and a.db.deleted[id], b.db.deleted and b.db.deleted[id]
+    local good = b.db.events[id] == nil and mine and theirs and math.abs(theirs - time()) <= 5 and math.abs(mine - time()) <= 5
+    return good, string.format("caster's %s, peer's %s, now %d", tostring(mine), tostring(theirs), time())
+end)
 -- ===== [end tests:LOG] =====
 
 

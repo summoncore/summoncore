@@ -194,6 +194,9 @@ local function initDB()
     db.settings.zenitNames = names
     db.harness = db.harness or {}
     ST.db = db
+    -- this character's badges, worked out quietly now if it has none kept yet (Scoring.Badges), so its next summons is
+    -- what announces a new one
+    if ST.Store.me() then ST.Scoring.Badges(ST.Store.me()) end
 end
 
 local frame = CreateFrame("Frame")
@@ -430,7 +433,7 @@ end
 function commands.badges()
     if ST.Gag.Blocked() then return end
     for _, b in ipairs(ST.Scoring.badges) do
-        local got = ST.db.badges[b.id]
+        local got = ST.Scoring.Badges()[b.id]
         print_(string.format("%s %s%s", got and "|cff33ff66[x]|r" or "[ ]", b.name,
             got and (" (" .. fmtTime(got.earned) .. ")") or (b.how and (": " .. b.how) or "")))
     end
