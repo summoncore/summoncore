@@ -3159,6 +3159,26 @@ add("a question reaches only Zennit's client, which answers it by whisper; off, 
         tostring(out.timeout and out.timeout.status), tostring(out.late), tostring(out.self and out.self.value))
 end)
 
+-- ===== [tests:SYNC] the sync handshake and Zennit's characters (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+-- ===== [end tests:SYNC] =====
+
+
+-- ===== [tests:FILING] filing a summons exactly once (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+-- ===== [end tests:FILING] =====
+
+
+-- ===== [tests:RACE] the weekly race rules (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+-- ===== [end tests:RACE] =====
+
+
+-- ===== [tests:LOG] undo, cards, resets and tallies (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+-- ===== [end tests:LOG] =====
+
+
 function T.Run(quiet)
     realEventClosed, realLateAnswer = ST.Week.EventClosed, ST.Week.LateAnswer
     ST.Week.EventClosed = function() return false end -- the other tests use old summons
