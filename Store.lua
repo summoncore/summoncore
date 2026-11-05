@@ -22,7 +22,16 @@ end
 -- Returns the id, the event, and a list of badge names earned by this save.
 -- localOnly keeps the event off the network (used for test events).
 function Store.Add(ev, localOnly)
-    ev.assistants = ev.assistants or {}
+    -- at most two assistants, each named once, and neither the caster nor the target: the same rule Sync.Decode holds every
+    -- record to, so nothing saved here can be a record that every friend refuses
+    local assistants, seen = {}, {}
+    for _, a in ipairs(ev.assistants or {}) do
+        if a ~= ev.caster and a ~= ev.target and not seen[a] and #assistants < 2 then
+            seen[a] = true
+            assistants[#assistants + 1] = a
+        end
+    end
+    ev.assistants = assistants
     ev.time = ev.time or time()
     ev.wrote = ev.wrote or time()
     ev.points, ev.kind = ST.Scoring.Score(ev.mapID, ev.subzone)

@@ -3159,6 +3159,364 @@ add("a question reaches only Zennit's client, which answers it by whisper; off, 
         tostring(out.timeout and out.timeout.status), tostring(out.late), tostring(out.self and out.self.value))
 end)
 
+-- ===== [tests:FILING] filing a summons into the log exactly once =====
+
+-- Runs fn(z) on a scratch client playing Zennit, with his client's seams in place, the new race rules, and the new filing rules
+-- (Respond.FILING_FROM) in force unless `from` says otherwise. Returns ok, err.
+local function asZennit(fn, from)
+    local z, R, S, G, W = newClient("Zennit"), ST.Respond, ST.Store, ST.Gag, ST.Week
+    local real = { me = S.me, is = G.IsZennit, later = R.later, print = ST.print, from = R.FILING_FROM, rules = W.RULES.from }
+    S.me = function() return "Zennit" end
+    G.IsZennit = function() return true end
+    R.later = function(f) f() end
+    ST.print = function() end
+    R.FILING_FROM = from or 0
+    W.RULES.from = 0
+    local ok, err = pcall(with, z, function() fn(z) end)
+    S.me, G.IsZennit, R.later, ST.print, R.FILING_FROM = real.me, real.is, real.later, real.print, real.from
+    W.RULES.from = real.rules
+    R.SetPrompt(nil, nil)
+    return ok, err
+end
+
+-- A summons of Zennit his client filed itself for `caster`, answered `result` (as FileWitnessed leaves it).
+local function filed(db, caster, t, result)
+    local id = "Zennit-" .. t
+    db.events[id] = { caster = caster, target = "Zennit", by = "Zennit", assistants = {}, mapID = 1436, subzone = "Sentinel Hill",
+        time = t, wrote = t, points = 3, kind = "zone", confirmed = false,
+        response = { result = result or "accepted", zroll = 0, sroll = 0, time = t + 5 } }
+    return id
+end
+
+-- The caster's own record of the same summons, as it comes over the wire.
+local function own(caster, t, over)
+    local ev = { caster = caster, target = "Zennit", assistants = {}, mapID = 1436, subzone = "Sentinel Hill", time = t, wrote = t,
+        confirmed = true }
+    for k, v in pairs(over or {}) do ev[k] = v end
+    return caster .. "-" .. t, ev
+end
+
+add("a caster's record that reaches his client by a batch, or that it already holds, takes over the summons it filed", function()
+    local out = {}
+    local ok, err = asZennit(function(z)
+        local now = time()
+        -- by a batch: added
+        local fid = filed(z.db, "Wally", now - 30)
+        local wid, wev = own("Wally", now - 10)
+        z.state.requested["Wally"] = clock
+        out.batch = Sync.OnMessage("1~B~" .. Sync.Encode(wid, wev), "WHISPER", "Wally")
+        out.batchGone = z.db.events[fid] == nil and Store.IsDeleted(fid)
+        out.batchMoved = z.db.events[wid] and z.db.events[wid].response and z.db.events[wid].response.result
+        -- already held (merged before his client filed its own, say by an older version): a live copy is kept, and still adopts
+        local vid, vev = own("Vic", now - 200)
+        z.db.events[vid] = select(2, own("Vic", now - 200))
+        local gid = filed(z.db, "Vic", now - 190, "declined")
+        out.kept = Sync.OnMessage("1~E~" .. Sync.Encode(vid, vev), "PARTY", "Vic")
+        out.keptGone = z.db.events[gid] == nil
+        out.keptMoved = z.db.events[vid].response and z.db.events[vid].response.result
+        local n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count = n
+    end)
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.batch == "added" and out.batchGone and out.batchMoved == "accepted"
+        and (out.kept == "kept" or out.kept == "replaced") and out.keptGone and out.keptMoved == "declined" and out.count == 2
+    return good, string.format("batch %s (filed gone %s, moved %s); held %s (filed gone %s, moved %s); %d records", tostring(out.batch),
+        tostring(out.batchGone), tostring(out.batchMoved), tostring(out.kept), tostring(out.keptGone), tostring(out.keptMoved), out.count or -1)
+end)
+
+add("by a batch, a caster's record leaves a closed week, or one before the new filing rules, as it was played", function()
+    local out = {}
+    local W, realClosed = ST.Week, ST.Week.EventClosed
+    local function batch(z, t)
+        local fid = filed(z.db, "Wally", t - 20)
+        local wid, wev = own("Wally", t)
+        z.state.requested["Wally"] = clock
+        local res = Sync.OnMessage("1~B~" .. Sync.Encode(wid, wev), "WHISPER", "Wally")
+        return res, z.db.events[fid] ~= nil and not z.db.events[wid].response
+    end
+    local ok, err = asZennit(function(z)
+        W.EventClosed = function(ev) return ev.time < time() - 1000 end
+        out.closedRes, out.closedLeft = batch(z, time() - 5000)
+        out.openRes, out.openLeft = batch(z, time() - 100)
+    end)
+    W.EventClosed = realClosed
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local ok2, err2 = asZennit(function(z)
+        out.oldRes, out.oldLeft = batch(z, time() - 100)
+        -- a live E is adopted as it always was, whatever the week
+        local fid = filed(z.db, "Cy", time() - 60)
+        local cid, cev = own("Cy", time() - 50)
+        Sync.OnMessage("1~E~" .. Sync.Encode(cid, cev), "PARTY", "Cy")
+        out.liveGone = z.db.events[fid] == nil
+    end, math.huge)
+    if not ok2 then return false, "ERROR " .. tostring(err2) end
+    local good = out.closedRes == "added" and out.closedLeft and out.openRes == "added" and out.openLeft == false
+        and out.oldRes == "added" and out.oldLeft and out.liveGone
+    return good, string.format("closed week left %s, open week left %s, before the rules left %s, live adopted %s",
+        tostring(out.closedLeft), tostring(out.openLeft), tostring(out.oldLeft), tostring(out.liveGone))
+end)
+
+add("after login his client adopts what it filed in the open weeks, nearest first, and leaves closed weeks and others' clients alone", function()
+    local out = {}
+    local W, realClosed = ST.Week, ST.Week.EventClosed
+    local ok, err = asZennit(function(z)
+        local now = time()
+        W.EventClosed = function(ev) return ev.time < now - 1000 end
+        -- an open week: two summons by Wally a minute apart, both filed by his client (the first declined, the second accepted)
+        local f1, f2 = filed(z.db, "Wally", now - 120, "declined"), filed(z.db, "Wally", now - 60, "accepted")
+        local w1, e1 = own("Wally", now - 115)
+        local w2, e2 = own("Wally", now - 58)
+        z.db.events[w1], z.db.events[w2] = e1, e2
+        -- a closed week: left as it was played
+        local f3 = filed(z.db, "Cy", now - 5000)
+        local w3, e3 = own("Cy", now - 4990)
+        z.db.events[w3] = e3
+        out.n = ST.Respond.AdoptAll()
+        out.r1 = e1.response and e1.response.result
+        out.r2 = e2.response and e2.response.result
+        out.gone = z.db.events[f1] == nil and z.db.events[f2] == nil
+        out.closed = z.db.events[f3] ~= nil and e3.response == nil
+        out.again = ST.Respond.AdoptAll()
+        ST.Gag.IsZennit = function() return false end
+        out.other = ST.Respond.AdoptAll()
+    end)
+    W.EventClosed = realClosed
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.n == 2 and out.r1 == "declined" and out.r2 == "accepted" and out.gone and out.closed and out.again == 0
+        and out.other == 0
+    return good, string.format("adopted %s (%s, %s), closed week kept %s, again %s, on another client %s", tostring(out.n),
+        tostring(out.r1), tostring(out.r2), tostring(out.closed), tostring(out.again), tostring(out.other))
+end)
+
+add("a decline his client filed, moved onto a caster's record with a writ, is decided again and costs him; not before the new rules", function()
+    return newRules(function()
+        local out = {}
+        local function run(writ, from)
+            local res = {}
+            local ok, err = asZennit(function(z)
+                local now = time()
+                filed(z.db, "Wally", now - 30, "declined")
+                local wid, wev = own("Wally", now - 20, { writ = writ, points = 3, kind = "zone" })
+                z.db.events[wid] = wev
+                res.adopted = ST.Respond.Adopt(wid, wev)
+                res.result = wev.response and wev.response.result
+                res.goal = Store.Goal(wev)
+            end, from)
+            if not ok then error(err, 0) end
+            return res
+        end
+        local okRun, err = pcall(function()
+            out.writ = run(true)
+            out.plain = run(nil)
+            out.old = run(true, math.huge)
+        end)
+        if not okRun then return false, "ERROR " .. tostring(err) end
+        local good = out.writ.adopted and out.writ.result == "refused" and out.writ.goal == -3
+            and out.plain.result == "declined" and out.plain.goal == 0 and out.old.result == "declined"
+        return good, string.format("writ: %s (%s); none: %s; before the rules: %s", tostring(out.writ.result), tostring(out.writ.goal),
+            tostring(out.plain.result), tostring(out.old.result))
+    end)
+end)
+
+add("a warlock casting again after he declined is filed again; the same prompt, or a form answer, files nothing", function()
+    local out = {}
+    local R = ST.Respond
+    local ok, err = asZennit(function(z)
+        local now = time()
+        R.SetPrompt(now - 70, nil)
+        out.first = R.Real("decline", "Wally", true)                     -- no record from Wally: his client files it, declined
+        out.same = R.Real("decline", "Wally", true)                      -- the same prompt again: nothing more
+        R.SetPrompt(now, nil)                                        -- Wally casts again; this time he accepts
+        out.second = R.Real("accept", "Wally", true)
+        local n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count = n
+        -- a summons he answered on the Index's form, then in the game's prompt: the form's answer stands for it
+        local vid, vev = own("Vic", now + 1)
+        vev.response = { result = "accepted", zroll = 0, sroll = 0, time = now + 2 }
+        z.db.events[vid] = vev
+        R.SetPrompt(now + 3, nil)
+        out.form = R.Real("accept", "Vic", true)
+        n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count2 = n
+    end)
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.first and out.first.result == "declined" and out.same == nil and out.second and out.second.result == "accepted"
+        and out.count == 2 and out.form == nil and out.count2 == 3
+    return good, string.format("first %s, same prompt %s, again %s, %d records; form-answered %s, %d records",
+        tostring(out.first and out.first.result), tostring(out.same), tostring(out.second and out.second.result), out.count or -1,
+        tostring(out.form), out.count2 or -1)
+end)
+
+add("the assistants prompt ticks at most two, and no record ever saves more than two, a repeat, the caster or the target", function()
+    local P = ST.Prompt
+    local three, two = P.PreTicks({ "Cy", "Di", "Ed" }), P.PreTicks({ "Cy", "Di" })
+    local nThree = 0
+    for _ in pairs(three) do nThree = nThree + 1 end
+    local a = newClient("Wally")
+    local id, ev = with(a, function()
+        local i, e = Store.Add({ caster = "Wally", target = "Zennit", assistants = { "Cy", "Cy", "Wally", "Zennit", "Di", "Ed" },
+            mapID = 1436, subzone = "Sentinel Hill", time = BASE + 7, confirmed = true }, true)
+        return i, e
+    end)
+    local back = Sync.Decode(Sync.Encode(id, ev))
+    local good = nThree == 0 and two.Cy and two.Di and table.concat(ev.assistants, ",") == "Cy,Di" and back ~= nil
+    return good, string.format("three detected tick %d, two tick %s; saved %s; decodes %s", nThree,
+        tostring(two.Cy and two.Di), table.concat(ev.assistants, ","), tostring(back ~= nil))
+end)
+
+-- Plays a ritual through the detector and the witness with the game's unit calls stood in for: the caster's client (Wally) in a
+-- party with Cy and Di, targeting Zennit. Returns what was saved, what the prompt was asked, and any witness note sent.
+local function ritual(steps)
+    local D, P = ST.Detector, ST.Prompt
+    local got = { saved = {}, asked = nil, notes = {} }
+    local roster, channeling, target = { "Cy", "Di" }, {}, "Zennit"
+    local gt, tickers = 10, {}
+    local real = { UnitName = UnitName, UnitExists = UnitExists, UnitChannelInfo = UnitChannelInfo, IsInRaid = IsInRaid,
+        GetTime = GetTime, time = time, NewTicker = C_Timer.NewTicker, NewTimer = C_Timer.NewTimer, ask = P.Ask,
+        witness = Sync.SendWitness, print = ST.print, me = Store.me, lastCommit = D.lastCommit }
+    D.lastCommit = 0 -- our clock starts at 10: a commit made on the real one must not look like a second SUCCEEDED
+    local now = real.time()
+    rawset(_G, "UnitName", function(u)
+        if u == "player" then return "Wally" end
+        if u == "target" then return target end
+        if u == "party1target" or u == "party2target" then return "Zennit" end
+        local i = tonumber((u or ""):match("^party(%d)$"))
+        return i and roster[i] or nil
+    end)
+    rawset(_G, "UnitExists", function(u)
+        local i = tonumber((u or ""):match("^party(%d)$"))
+        return u == "player" or (i ~= nil and i <= #roster)
+    end)
+    rawset(_G, "UnitChannelInfo", function(u)
+        if channeling[u] then return "Ritual of Summoning", "", 0, 0, 0, false, false, ST.RITUAL_ID end
+    end)
+    rawset(_G, "IsInRaid", function() return false end)
+    rawset(_G, "GetTime", function() return gt end)
+    rawset(_G, "time", function(t) if t then return real.time(t) end return now end)
+    rawset(C_Timer, "NewTicker", function(_, fn)
+        local t = { fn = fn }
+        t.Cancel = function() t.dead = true end
+        tickers[#tickers + 1] = t
+        return t
+    end)
+    rawset(C_Timer, "NewTimer", function() return { Cancel = function() end } end)
+    P.Ask = function(tgt, candidates, pre, onDone) got.asked = { target = tgt, pre = pre, done = onDone } end
+    Sync.SendWitness = function(note) got.notes[#got.notes + 1] = note end
+    ST.print = function() end
+    Store.me = function() return "Wally" end
+    local a = newClient("Wally")
+    local ctl = {
+        channel = function(u, on) channeling[u] = on or nil end,
+        target = function(n) target = n end,
+        wait = function(s)
+            for _ = 1, s * 2 do
+                gt, now = gt + 0.5, now + 0.5
+                for _, t in ipairs(tickers) do if not t.dead then t.fn() end end
+            end
+        end,
+        sent = function() D.OnCast(nil, "UNIT_SPELLCAST_SENT", "player", "Zennit", "guid", ST.RITUAL_ID) end,
+        event = function(event, unit) D.OnCast(nil, event, unit or "player", "guid", ST.RITUAL_ID) end,
+        witness = function(event, unit) D.OnWitness(nil, event, unit) end,
+        now = function() return now end,
+    }
+    local ok, err = pcall(with, a, function() steps(ctl, got) end)
+    -- whatever happened, the player's own channel ends, so the witness is free again on a real client
+    channeling.player = nil
+    pcall(with, a, function() D.OnWitness(nil, "UNIT_SPELLCAST_CHANNEL_STOP", "player") end)
+    rawset(_G, "UnitName", real.UnitName)
+    rawset(_G, "UnitExists", real.UnitExists)
+    rawset(_G, "UnitChannelInfo", real.UnitChannelInfo)
+    rawset(_G, "IsInRaid", real.IsInRaid)
+    rawset(_G, "GetTime", real.GetTime)
+    rawset(_G, "time", real.time)
+    rawset(C_Timer, "NewTicker", real.NewTicker)
+    rawset(C_Timer, "NewTimer", real.NewTimer)
+    P.Ask = real.ask
+    Sync.SendWitness, ST.print, Store.me = real.witness, real.print, real.me
+    D.lastCommit = real.lastCommit
+    if not ok then error(err, 0) end
+    for _, ev in pairs(a.db.events) do got.saved[#got.saved + 1] = ev end
+    return got
+end
+
+add("a ritual still channelling after 30 s keeps the target it was cast on and its helpers, and is filed at the time it was cast", function()
+    local out = {}
+    local got = ritual(function(c, g)
+        c.sent()
+        c.event("UNIT_SPELLCAST_CHANNEL_START")
+        c.channel("player", true)
+        c.channel("party1", true)
+        c.channel("party2", true)
+        c.target("Cy")                                              -- the caster clicks a helper while waiting for clickers
+        c.wait(31)
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        out.auto = g.saved and true
+        -- a second ritual with one helper: the prompt saves it 20 s later, at the ritual's time
+        c.channel("party2", false)
+        c.target("Zennit")
+        c.wait(10)
+        c.sent()
+        c.event("UNIT_SPELLCAST_CHANNEL_START")
+        c.wait(2)
+        out.castAt = c.now()
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        c.wait(20)
+        if g.asked then g.asked.done({ "Cy" }, false) end
+    end)
+    table.sort(got.saved, function(x, y) return x.time < y.time end)
+    local first, second = got.saved[1], got.saved[2]
+    local good = #got.saved == 2 and first.target == "Zennit" and table.concat(first.assistants, ",") == "Cy,Di" and first.confirmed
+        and second.target == "Zennit" and second.time == out.castAt and table.concat(second.assistants, ",") == "Cy"
+    return good, string.format("%d saved; first on %s with %s; second at %s (cast %s)", #got.saved, tostring(first and first.target),
+        first and table.concat(first.assistants, ",") or "-", tostring(second and second.time), tostring(out.castAt))
+end)
+
+add("the target or the caster seen channelling is never credited as an assistant: two helpers with the target among them ask", function()
+    local got = ritual(function()
+        ST.Detector.Finish({ target = "Zennit", mapID = 1436, subzone = "Sentinel Hill", helpers = { "Cy", "Zennit" } })
+    end)
+    local pre = got.asked and table.concat(got.asked.pre, ",")
+    local good = #got.saved == 0 and pre == "Cy"
+    return good, string.format("%d saved without asking; prompt ticks %s", #got.saved, tostring(pre))
+end)
+
+add("the caster's own client never sends a witness note naming one of its helpers as the caster; a bystander's still does", function()
+    local out = {}
+    local got = ritual(function(c, g)
+        -- Wally's own ritual, committed as the channel begins; Cy then clicks the portal and stops
+        c.sent()
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        c.channel("player", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "player")
+        c.wait(10)
+        c.channel("party1", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party1")
+        c.channel("party1", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "party1")
+        c.channel("player", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+        out.own = #g.notes
+        if g.asked then g.asked.done({}, false) end
+        -- later Wally only watches: Cy casts (on Wally's target stand-in), Di clicks, Cy stops
+        c.wait(60)
+        c.channel("party1", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party1")
+        c.channel("party2", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party2")
+        c.channel("party1", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "party1")
+    end)
+    local note = got.notes[1]
+    local good = out.own == 0 and #got.notes == 1 and note.caster == "Cy" and table.concat(note.helpers, ",") == "Di"
+    return good, string.format("notes during his own ritual %s; as a bystander %d (caster %s)", tostring(out.own), #got.notes,
+        tostring(note and note.caster))
+end)
+
+-- ===== [end tests:FILING] =====
+
 function T.Run(quiet)
     realEventClosed, realLateAnswer = ST.Week.EventClosed, ST.Week.LateAnswer
     ST.Week.EventClosed = function() return false end -- the other tests use old summons

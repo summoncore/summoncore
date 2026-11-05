@@ -855,10 +855,12 @@ local SUMMON_WINDOW = 150   -- the game's prompt lasts about two minutes; a late
 local FILE_WAIT = 5         -- seconds to wait for the caster's own record before his client files the summons itself
 local lastSummoner          -- who the game's prompt named, when the client says (a plain first name, or nil)
 local promptAt, promptArea  -- when the game's prompt last came up, and the place it named
+local promptOf = {}         -- id -> the promptAt of the game's prompt that answered (or claimed) that summons
 Respond.later = function(fn) C_Timer.After(FILE_WAIT, fn) end -- a seam: the self-test runs it at once
 
 -- What he pressed, recorded on the summons `pick` ({ id, ev }).
 local function answer(pick, kind)
+    if promptAt then promptOf[pick.id] = promptAt end -- this summons was the one that prompt was about
     local rolling = state[pick.id] ~= nil
     state[pick.id] = nil -- a roll in flight is over: the game's prompt is his answer, and no die is spent
     if pendingRoll and pendingRoll.id == pick.id then pendingRoll = nil end
@@ -955,6 +957,9 @@ local afkFrame = CreateFrame("Frame")
 afkFrame:RegisterEvent("PLAYER_LOGIN")
 pcall(afkFrame.RegisterEvent, afkFrame, "PLAYER_FLAGS_CHANGED")
 afkFrame:SetScript("OnEvent", ST.Safe("the AFK watch", function(_, event, unit)
+    if event == "PLAYER_LOGIN" then
+        C_Timer.After(Respond.ADOPT_AFTER, function() ST.Guard("the Index's sweep", Respond.AdoptAll) end)
+    end
     if event == "PLAYER_FLAGS_CHANGED" and unit ~= "player" then return end
     if Respond.isAFK() then afkSince = afkSince or time() else afkSince = nil end
 end))
@@ -1014,10 +1019,14 @@ end
 function Respond.FileWitnessed(kind, summoner)
     local me, now = ST.Store.me(), time()
     if not promptAt or now - promptAt > SUMMON_WINDOW then return nil end
-    -- a record of it may be here after all, already answered (the Index's form): nothing to file
+    -- a record of it may be here after all: nothing to file. Only one still unanswered, or one that belongs to this prompt (answered
+    -- under it, or answered on the Index's form and claimed by no earlier prompt). One answered under an earlier prompt is an
+    -- earlier summons, so a warlock casting again after he declined is filed, not lost.
     for _, r in ipairs(ST.Store.Recent(30)) do
         if r.ev.target == me and not r.ev.fake and math.abs(r.ev.time - promptAt) <= SUMMON_WINDOW
-            and (not summoner or ST.baseName(r.ev.caster) == summoner) then
+            and (not summoner or ST.baseName(r.ev.caster) == summoner)
+            and (not r.ev.response or (promptOf[r.id] or promptAt) == promptAt) then
+            promptOf[r.id] = promptAt
             ST.Trace(kind .. ": a record of this summons is here already; nothing to file")
             return nil
         end
@@ -1033,30 +1042,81 @@ function Respond.FileWitnessed(kind, summoner)
     return answer({ id = id, ev = ev }, kind)
 end
 
+-- From the week of Monday 9 November 2026 (UTC), a caster's record that arrives by a batch, or is already held, takes over the
+-- summons his client filed (and the sweep after login does the same), and a no moved over is decided again. Weeks before keep the
+-- results they were played with, as Week.RULES.from keeps the old race rules.
+Respond.FILING_FROM = 1794182400
+function Respond.NewFiling(ev)
+    return ST.Week.Start(ev.time) >= Respond.FILING_FROM
+end
+
+local NO = { declined = true, excused = true, refused = true }
+
 -- The caster's own record arrived after his client filed the same summons: the answer moves to it, and the filed one goes.
--- Returns true when it did, so the Index's form does not open for a summons already answered.
+-- Returns true when it did, so the Index's form does not open for a summons already answered. Only a caster's own record that
+-- is still unanswered takes over: one with an answer has already been matched (or answered on its own), and the filed record
+-- nearest in time is the one it replaces, so two summons by one warlock close together each keep their own answer.
 function Respond.Adopt(id, ev)
+    if ev.by or ev.fake or ev.response then return false end
     local me = ST.Store.me()
-    for fid, f in pairs(ST.db.events) do
-        if fid ~= id and f.by == me and f.target == ev.target and math.abs(f.time - ev.time) <= SUMMON_WINDOW
-            and (f.caster == ev.caster or f.caster == "Unknown") then
-            if f.response and not ev.response then
-                local resp = {}
-                for key, v in pairs(f.response) do resp[key] = v end
-                resp.time = math.max(time(), f.response.time + 1)
-                -- moved after the summons' week closed: an answer he made in time stays in time, or every client would refuse it
-                if ST.Week.LateAnswer(ev, resp) then resp.time = f.response.time + 1 end
-                ST.Store.SetResponse(id, resp)
-                ST.Sync.SendResponse(id, resp)
-            end
-            ST.Store.Remove(fid)
-            ST.Trace(string.format("%s's own record replaced the one the Index filed (%s)", ev.caster, fid))
-            if ST.Hub then ST.Hub.Refresh() end
-            return true
+    local fid, f
+    for oid, o in pairs(ST.db.events) do
+        if oid ~= id and o.by == me and o.target == ev.target and math.abs(o.time - ev.time) <= SUMMON_WINDOW
+            and (o.caster == ev.caster or o.caster == "Unknown") then
+            local d, best = math.abs(o.time - ev.time), f and math.abs(f.time - ev.time)
+            if not f or d < best or (d == best and oid < fid) then fid, f = oid, o end
         end
     end
-    return false
+    if not f then return false end
+    -- the filed record goes first, so a decline moved over below is decided without counting it
+    ST.Store.Remove(fid)
+    if f.response then
+        local resp = {}
+        for key, v in pairs(f.response) do resp[key] = v end
+        resp.time = math.max(time(), f.response.time + 1)
+        -- moved after the summons' week closed: an answer he made in time stays in time, or every client would refuse it
+        if ST.Week.LateAnswer(ev, resp) then resp.time = f.response.time + 1 end
+        -- his client did not know of the caster's writ when it filed: a no is decided again on the caster's record, by the one rule
+        -- (Respond.NoResult), so a decline of a writ'd summons costs him as the README says, as it would have in the game's prompt
+        local redo = NO[resp.result] and not ST.Week.EventClosed(ev) and Respond.NewFiling(ev)
+            and Respond.NoResult(ev)
+        local changed = redo and redo ~= resp.result
+        if changed then resp.result = redo end
+        ST.Store.SetResponse(id, resp)
+        ST.Sync.SendResponse(id, resp)
+        if changed then
+            ST.print(Respond.Announce(ev, resp))
+            printWeek(ev, true)
+        end
+    end
+    ST.Trace(string.format("%s's own record replaced the one the Index filed (%s)", ev.caster, fid))
+    if ST.Hub then ST.Hub.Refresh() end
+    return true
 end
+
+-- After login his client looks over the weeks still open for summons of him it filed itself while the caster's own record was
+-- on its way, and hands each answer over (Adopt): a record that came by a batch, or before an update, is matched here. A
+-- closed week is never touched, so a result already decided does not change. Returns how many were adopted.
+function Respond.AdoptAll()
+    if not ST.Gag.IsZennit() then return 0 end
+    local me, list = ST.Store.me(), {}
+    for id, ev in pairs(ST.db.events) do
+        if ev.target == me and not ev.by and not ev.fake and not ev.response and ev.caster ~= me and not ST.Week.EventClosed(ev)
+            and Respond.NewFiling(ev) then
+            list[#list + 1] = { id = id, ev = ev }
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.ev.time ~= b.ev.time then return a.ev.time < b.ev.time end
+        return a.id < b.id
+    end)
+    local n = 0
+    for _, r in ipairs(list) do
+        if Respond.Adopt(r.id, r.ev) then n = n + 1 end
+    end
+    return n
+end
+Respond.ADOPT_AFTER = 30 -- seconds after login: time for the first hello's batches to arrive
 
 local promptFrame = CreateFrame("Frame")
 Respond.hooks = {} -- what was installed, for /sc check
