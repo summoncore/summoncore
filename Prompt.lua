@@ -56,14 +56,22 @@ function Prompt.Finish(confirmed)
     session.onDone(names, confirmed)
 end
 
--- candidates: party member names. preselected: names ticked to start with.
+-- The names to tick when the prompt opens: the detected helpers, unless more were seen than can be credited (a second ritual
+-- nearby, say). Then none are ticked and the caster chooses, so the countdown can never save more than two.
+function Prompt.PreTicks(preselected)
+    local pre = {}
+    if #(preselected or {}) > MAX_ASSISTANTS then return pre end
+    for _, n in ipairs(preselected or {}) do pre[n] = true end
+    return pre
+end
+
+-- candidates: party member names. preselected: names ticked to start with (none when there are more than two).
 -- onDone(assistants, confirmed) is always called exactly once.
 function Prompt.Ask(target, candidates, preselected, onDone)
     if not frame then build() end
     if open then Prompt.Finish(false) end
     open = { onDone = onDone }
-    local pre = {}
-    for _, n in ipairs(preselected or {}) do pre[n] = true end
+    local pre = Prompt.PreTicks(preselected)
     frame.question:SetText(string.format("Who helped with the summon of %s? Tick up to two ritual assistants.",
         T.Paint("cyan", target)))
     frame.hint:SetText("")
@@ -92,7 +100,9 @@ function Prompt.Ask(target, candidates, preselected, onDone)
     frame:SetHeight(148 + #candidates * ROW_H)
     frame:Show()
     -- the countdown: saves as ticked unless the caster changes something
-    frame.hint:SetText("Saves itself as ticked, unless you change something.")
+    local crowded = #(preselected or {}) > MAX_ASSISTANTS
+    frame.hint:SetText(crowded and "More than two were seen channelling: tick the two who helped." or
+        "Saves itself as ticked, unless you change something.")
     stopCountdown()
     local left = AUTO_SAVE
     frame.ok:SetText(string.format("CONFIRM (%d)", left))
@@ -103,7 +113,8 @@ function Prompt.Ask(target, candidates, preselected, onDone)
         if left > 0 then return frame.ok:SetText(string.format("CONFIRM (%d)", left)) end
         local names = checkedNames()
         ST.print(#names > 0 and ("Assistants saved as detected: " .. table.concat(names, " and ") .. ".") or
-            "Saved with no assistants (none were detected).")
+            (crowded and "Saved with no assistants (more than two were seen, and none was ticked)." or
+            "Saved with no assistants (none were detected)."))
         Prompt.Finish(false) -- saved by the countdown, not confirmed by the caster
     end)
 end

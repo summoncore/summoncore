@@ -989,15 +989,25 @@ function Sync.OnMessage(text, channel, sender)
         local id, ev = Sync.Decode(body)
         if not id then return "rejected:" .. tostring(ev) end
         local result = Sync.Merge(id, ev, sender, typ == "E")
+        local live = typ == "E" and result == "added"
         if result == "added" then
             st.added = st.added + 1
             announceSoon()
-            -- Zennit hears a recorded complaint when a friend summons him (live events only, not history).
-            if typ == "E" and ev.target == Sync.myName() and ST.Gag.IsZennit() then
-                ST.Clips.Play("zenit_land")
-                -- a summons he has already answered, filed by his own client while this record was on its way: the answer moves over
-                if ST.Respond and not ST.Respond.Adopt(id, ev) then ST.Respond.Incoming(id, ev) end
-            end
+        end
+        -- A caster's own record of a summons of Zennit, on his client: if his client filed the same summons itself while this
+        -- record was on its way, the answer moves over and the filed record goes, so the summons is never logged twice. A new live
+        -- record is matched as it always was; one by batch, or one already held, only in a week still open and from
+        -- Respond.FILING_FROM, so a decided week does not change.
+        local adopted
+        if (result == "added" or result == "replaced" or result == "kept") and ev.target == Sync.myName() and not ev.by
+            and ev.caster ~= Sync.myName() and ST.Gag.IsZennit() and ST.Respond
+            and (live or (not ST.Week.EventClosed(ev) and ST.Respond.NewFiling(ev))) then
+            adopted = ST.Respond.Adopt(id, ST.Store.Get(id) or ev)
+        end
+        -- Zennit hears a recorded complaint when a friend summons him (live events only, not history).
+        if live and ev.target == Sync.myName() and ST.Gag.IsZennit() then
+            ST.Clips.Play("zenit_land")
+            if ST.Respond and not adopted then ST.Respond.Incoming(id, ev) end
         end
         return result
     elseif typ == "Z" then

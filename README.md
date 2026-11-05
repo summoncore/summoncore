@@ -50,8 +50,11 @@ credited from the caster's snapshot either way. **When the caster does not have 
 answers the game's prompt and no record of it has arrived within a few seconds: the caster from the prompt (or the only warlock in his
 group), the place from where he arrives (or, if he declines, from a helper's client), and the helpers only if someone in the group
 runs the addon. Every client in the group that is not casting watches who channels a ritual and sends Zennit's client a note (`W`);
-a helper's own client also gives the place. If the caster's own record turns up later, it replaces the filed one and his answer
-moves to it. Nothing is filed if he never answers the prompt, and no writ can be played without the caster's addon. On the first login the addon says a
+a helper's own client also gives the place (the caster's own client never sends one). If the caster's own record turns up later,
+it replaces the filed one and his answer moves to it. From the week of 9 November 2026 that happens whether the record comes live
+or in a batch (his client also looks for such pairs a little after login), and a decline moved over is decided again, so a decline
+of a summons with a writ costs him; earlier weeks, and any closed week, keep what they were played with. A warlock who casts again
+after he declined is filed again. Nothing is filed if he never answers the prompt, and no writ can be played without the caster's addon. On the first login the addon says a
 three-line welcome to this effect (`/sc welcome` says it again).
 
 ## Commands
@@ -157,8 +160,11 @@ License, `Media/fonts/VT323-OFL.txt`); if the game cannot load it, the standard 
 
 Exactly two group members seen channeling the ritual are credited automatically, in a party or anywhere in a
 raid. With any other count, the prompt opens with the detected helpers ticked (listed first; in a raid the list
-stops at 12). It saves itself as ticked after 20 seconds, so you only need to touch it to correct the names;
-changing a tick stops the countdown. Solo or in a two-person party it saves without asking.
+stops at 12), unless more than two were seen (another ritual nearby, say): then none is ticked and you tick the two
+who helped. It saves itself as ticked after 20 seconds, so you only need to touch it to correct the names;
+changing a tick stops the countdown. Solo or in a two-person party it saves without asking. The summons keeps the time the
+ritual was cast, however long the prompt stays open. The one summoned and the caster are never credited as assistants, and
+no summons is ever saved with more than two.
 
 ### Scoring
 
