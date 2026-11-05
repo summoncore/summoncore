@@ -131,18 +131,45 @@ function Scoring.Announce()
     for _, name in ipairs(Scoring.EvaluateBadges()) do ST.print("|cffffd100Badge earned:|r " .. name) end
 end
 
--- Awards any newly met badges. Returns a list of the badge names earned just now.
-function Scoring.EvaluateBadges()
-    local me = ST.Store.me()
-    local stats = ST.Store.Stats(me)
-    stats.extra = ST.Ledger and ST.Ledger.CasterStats(me) or {}
-    stats.cardsUsedUp = ST.Cards and ST.Cards.Exhausted(me) or 0
-    local earned = {}
+-- What a character qualifies for (stats as Store.Stats gives them, plus the ledger's figures and the cards it used up).
+local function statsOf(name)
+    local stats = ST.Store.Stats(name)
+    stats.extra = ST.Ledger and ST.Ledger.CasterStats(name) or {}
+    stats.cardsUsedUp = ST.Cards and ST.Cards.Exhausted(name) or 0
+    return stats
+end
+
+-- Adds to `got` every badge `name` now meets and does not hold yet. Returns their names.
+local function award(name, got)
+    local stats, earned = statsOf(name), {}
     for _, b in ipairs(Scoring.badges) do
-        if not ST.db.badges[b.id] and b.test(stats) then
-            ST.db.badges[b.id] = { earned = time() }
+        if not got[b.id] and b.test(stats) then
+            got[b.id] = { earned = time() }
             earned[#earned + 1] = b.name
         end
     end
     return earned
+end
+
+-- The badges a character holds (default: the one being played), as { id = { earned } }. Badges are earned per character
+-- (Store.Stats counts what that character cast), but the saved variables are the account's, so they are kept per character
+-- in db.badgesBy. A character with no entry yet (each one, the first time this version runs) takes the badges it already
+-- qualifies for, quietly: nothing is announced twice, and nobody loses a badge they earned. The old account-wide db.badges is
+-- left where it is, unused.
+function Scoring.Badges(name)
+    name = name or ST.Sync.myName()
+    ST.db.badgesBy = ST.db.badgesBy or {}
+    local got = ST.db.badgesBy[name]
+    if not got then
+        got = {}
+        ST.db.badgesBy[name] = got
+        award(name, got)
+    end
+    return got
+end
+
+-- Awards any newly met badges to the character being played. Returns a list of the badge names earned just now.
+function Scoring.EvaluateBadges()
+    local me = ST.Sync.myName()
+    return award(me, Scoring.Badges(me))
 end

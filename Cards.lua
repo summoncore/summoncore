@@ -13,6 +13,18 @@ local function base(name)
     return ST.baseName(name) or name or ""
 end
 
+-- A holder as the game writes a name: "bravo" typed in /sc card sell is Bravo. Cards are stored and sent this way.
+function Cards.Holder(name)
+    local b = base(name)
+    return b:sub(1, 1):upper() .. b:sub(2):lower()
+end
+
+-- Who a card belongs to, for matching: the plain name in lower case, so a card sold to "bravo" (or saved that way by an
+-- earlier version) is Bravo's.
+local function key(name)
+    return base(name):lower()
+end
+
 function Cards.All()
     ST.db.cards = ST.db.cards or {}
     return ST.db.cards
@@ -34,7 +46,7 @@ local function usedBy()
     local used = {}
     for _, ev in pairs(ST.db.events) do
         if not ev.fake and ev.response and ev.response.card and ST.Week.IsZennit(ev.target) then
-            local who = base(ev.caster)
+            local who = key(ev.caster)
             used[who] = (used[who] or 0) + 1
         end
     end
@@ -42,14 +54,14 @@ local function usedBy()
 end
 
 -- Every holder's cards with the punches left on each, spending the oldest card first.
--- Returns { holderBase = { cards = { { card, left } }, left = total, bought = total, used = n } }.
+-- Returns { holderKey = { cards = { { card, left } }, left = total, bought = total, used = n } }.
 function Cards.Balances()
     local used, out = usedBy(), {}
     for _, card in ipairs(Cards.Sorted()) do
-        local who = base(card.holder)
+        local who = key(card.holder)
         local b = out[who]
         if not b then
-            b = { cards = {}, left = 0, bought = 0, used = used[who] or 0, name = card.holder }
+            b = { cards = {}, left = 0, bought = 0, used = used[who] or 0, name = Cards.Holder(card.holder) }
             out[who] = b
         end
         b.bought = b.bought + card.punches
@@ -69,13 +81,13 @@ end
 
 -- Punches left for a holder (a character name).
 function Cards.Left(holder)
-    local b = Cards.Balances()[base(holder)]
+    local b = Cards.Balances()[key(holder)]
     return b and b.left or 0
 end
 
 -- Punches left on one card.
 function Cards.PunchesLeft(card)
-    local b = Cards.Balances()[base(card.holder)]
+    local b = Cards.Balances()[key(card.holder)]
     if not b then return 0 end
     for _, entry in ipairs(b.cards) do
         if entry.card.id == card.id then return entry.left end
@@ -85,7 +97,7 @@ end
 
 -- How many of this holder's cards have been used up.
 function Cards.Exhausted(holder)
-    local b = Cards.Balances()[base(holder)]
+    local b = Cards.Balances()[key(holder)]
     local n = 0
     for _, entry in ipairs(b and b.cards or {}) do
         if entry.left == 0 then n = n + 1 end
@@ -95,7 +107,7 @@ end
 
 -- What one punch is worth for this holder, in silver: the price of their oldest card with a punch left, per punch.
 function Cards.UnitPrice(holder)
-    local b = Cards.Balances()[base(holder)]
+    local b = Cards.Balances()[key(holder)]
     if b then
         for _, entry in ipairs(b.cards) do
             if entry.left > 0 then return math.max(1, math.floor(entry.card.silver / entry.card.punches + 0.5)) end
@@ -131,7 +143,7 @@ end
 -- Sells a card (on Zennit's client only): records it, tells everyone, and says so. Returns the card, or nil and why.
 function Cards.Issue(holder, punches, silver)
     if not ST.Week.IsZennit(ST.Sync.myName()) then return nil, "only Zennit can sell cards" end
-    holder = base(holder)
+    holder = Cards.Holder(holder)
     punches, silver = tonumber(punches), tonumber(silver)
     if holder == "" then return nil, "sell it to whom?" end
     if not punches or punches < 1 or punches > 50 then return nil, "a card has 1 to 50 punches" end
@@ -159,7 +171,7 @@ function Cards.Lines(holder)
     table.sort(names)
     local balances = Cards.Balances()
     for _, who in ipairs(names) do
-        if not holder or base(holder) == who then
+        if not holder or key(holder) == who then
             local b = balances[who]
             lines[#lines + 1] = string.format("%s: %d of %d punches left, %d already stamped.", b.name, b.left, b.bought, b.used)
         end

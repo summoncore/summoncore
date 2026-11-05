@@ -25,6 +25,10 @@ function Store.Add(ev, localOnly)
     ev.assistants = ev.assistants or {}
     ev.time = ev.time or time()
     ev.wrote = ev.wrote or time()
+    -- Never file a summons at or before the last reset: every peer holding the same mark refuses it (Sync.Merge), so a clock
+    -- behind the admin's would keep it on this client alone. It is filed just after the mark instead.
+    local cut = ST.db.resetAt
+    if cut and ev.time <= cut then ev.time, ev.wrote = cut + 1, math.max(ev.wrote, cut + 1) end
     if ev.subzone then ev.subzone = ST.Sync.Clip(ev.subzone, ST.Sync.MAX_SUBZONE) end -- keep what friends will receive
     ev.points, ev.kind = ST.Scoring.Score(ev.mapID, ev.subzone)
     local id = newID(ev.by or ev.caster, ev.time) -- a record Zennit's client filed for someone else starts with his name
@@ -139,17 +143,17 @@ function Store.Remove(id)
     return true
 end
 
--- Removes the newest summon this character cast (nobody can delete someone else's) and leaves a tombstone so
--- sync cannot bring it back; test summons are simply dropped.
+-- Removes the newest summons this client wrote (its id starts with our name: nobody can delete someone else's, Sync's T),
+-- through Store.Remove, so it leaves the same tombstone; test summons are simply dropped. That is usually the newest summons
+-- this character cast, and on Zennit's client it can also be one his client filed for a caster without the addon.
 function Store.RemoveLast()
-    local me = ST.Sync.myName()
+    local prefix = ST.Sync.myName() .. "-"
     for _, r in ipairs(Store.Recent()) do
-        if r.ev.caster == me then
-            ST.db.events[r.id] = nil
-            if not r.ev.fake then
-                ST.db.deleted = ST.db.deleted or {}
-                ST.db.deleted[r.id] = time()
-                if Store.onRemove then Store.onRemove(r.id) end
+        if r.id:sub(1, #prefix) == prefix then
+            if r.ev.fake then
+                ST.db.events[r.id] = nil
+            elseif not Store.Remove(r.id) then
+                return nil
             end
             return r
         end
@@ -180,20 +184,23 @@ function Store.Tallies()
     end
     for _, ev in pairs(ST.db.events) do
         if not ev.fake then -- test summons are not counted
-            local c = row(ev.caster)
-            c.cast = c.cast + 1
-            if Store.Lands(ev) then c.points = c.points + (ev.points or 0) end
-            local tr = row(ev.target)
-            tr.received = tr.received + 1
+            -- only a summons that lands is counted (README: points, tallies and badges only count summons that land); his
+            -- points still count the dice he won and the refusals that cost him, as Store.Goal says
+            local c, tr = row(ev.caster), row(ev.target)
             tr.points = tr.points + Store.Goal(ev)
-            for _, a in ipairs(ev.assistants or {}) do row(a).assisted = row(a).assisted + 1 end
+            if Store.Lands(ev) then
+                c.cast = c.cast + 1
+                c.points = c.points + (ev.points or 0)
+                tr.received = tr.received + 1
+                for _, a in ipairs(ev.assistants or {}) do row(a).assisted = row(a).assisted + 1 end
+            end
         end
     end
     return t
 end
 
--- The Party tab's rows: every name in the tallies, ranked by what the race counts (summons of Zennit this season, from
--- `casters`, keyed by plain name), then by points, then by name. Each row is { name, tally, ofZennit }.
+-- The Party tab's rows: every name in the tallies, ranked by summons of Zennit this season (from `casters`, keyed by plain
+-- name, which counts every one of them, as the titles do), then by points, then by name. Each row is { name, tally, ofZennit }.
 function Store.Ranked(tallies, casters)
     local rows = {}
     for name, t in pairs(tallies) do

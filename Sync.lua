@@ -581,13 +581,19 @@ function Sync.SendCard(card, target)
     end
 end
 
--- Resends every card that still has a punch (up to 20), if this client is Zennit's.
+-- Resends cards, if this client is Zennit's. Punches are spent oldest card first (Cards.lua), so a client that missed a card
+-- that is now used up would charge its punches to the holder's newer card: every card of a holder who still has a punch goes
+-- with his hello (newest first, up to 40), and every card (up to MAX_CARDS) is whispered to a client that asked for events.
+local CARDS_PER_HELLO = 40
 function Sync.SendCards(target)
     if not (ST.Cards and ST.Week.IsZennit(Sync.myName())) then return end
-    local sent = 0
-    for _, card in ipairs(ST.Cards.Sorted()) do
-        if sent >= 20 then break end
-        if ST.Cards.PunchesLeft(card) > 0 then
+    local list, sent, left = ST.Cards.Sorted(), 0, {}
+    for i = #list, 1, -1 do
+        local card = list[i]
+        if sent >= (target and MAX_CARDS or CARDS_PER_HELLO) then break end
+        local holder = card.holder:lower()
+        if left[holder] == nil then left[holder] = ST.Cards.Left(card.holder) > 0 end
+        if target or left[holder] then
             Sync.SendCard(card, target)
             sent = sent + 1
         end
@@ -1030,7 +1036,9 @@ function Sync.OnMessage(text, channel, sender)
         local count = 0
         for _ in pairs(ST.db.cards) do count = count + 1 end
         if count >= MAX_CARDS then return "rejected:full" end
-        ST.db.cards[cid] = { id = cid, holder = holder, punches = punches, silver = silver, time = ct }
+        -- the holder as the game writes the name, whatever was typed when it was sold (Cards.Holder)
+        ST.db.cards[cid] = { id = cid, holder = ST.Cards and ST.Cards.Holder(holder) or holder, punches = punches, silver = silver,
+            time = ct }
         if Sync.onCard then Sync.onCard(ST.db.cards[cid]) end
         return "card"
 
@@ -1119,7 +1127,7 @@ function Sync.OnMessage(text, channel, sender)
         if #id > 48 or id:sub(1, #sender + 1) ~= sender .. "-" then return "rejected:sender" end
         ST.db.deleted = ST.db.deleted or {}
         if ST.db.deleted[id] then return "kept" end
-        ST.db.deleted[id] = now
+        ST.db.deleted[id] = time() -- a wall-clock time, like the caster's own tombstone (Store.Remove), not this session's GetTime
         ST.db.events[id] = nil
         return "deleted"
 
