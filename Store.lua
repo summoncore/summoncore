@@ -141,10 +141,25 @@ function Store.Recent(limit)
     return list
 end
 
--- Removes a summons this client wrote (its id starts with our name), leaving a tombstone so sync cannot bring it back.
+-- Who wrote a summons: the name its id starts with ("<author>-<time>[-n]"; a name never holds a '-').
+function Store.Author(id)
+    return type(id) == "string" and id:match("^([^%-]+)%-") or nil
+end
+
+-- Whether this client may delete the summons `id`: one its own character wrote, or, on Zennit's account, one any of his
+-- characters wrote (his client files summons of him on whichever character he is playing, and must be able to take them
+-- back, and to say so again, from another).
+function Store.Mine(id)
+    local author, me = Store.Author(id), ST.Sync.myName()
+    if not author or not me then return false end
+    if author == me then return true end
+    return ST.Week ~= nil and ST.Week.IsZennit(me) and ST.Week.IsZennit(author) and ST.IsZennitAccount()
+end
+
+-- Removes a summons this client wrote (Store.Mine), leaving a tombstone so sync cannot bring it back.
 function Store.Remove(id)
     local ev = ST.db.events[id]
-    if not ev or id:sub(1, #ST.Sync.myName() + 1) ~= ST.Sync.myName() .. "-" then return false end
+    if not ev or not Store.Mine(id) then return false end
     ST.db.events[id] = nil
     ST.db.deleted = ST.db.deleted or {}
     ST.db.deleted[id] = time()
@@ -156,9 +171,8 @@ end
 -- through Store.Remove, so it leaves the same tombstone; test summons are simply dropped. That is usually the newest summons
 -- this character cast, and on Zennit's client it can also be one his client filed for a caster without the addon.
 function Store.RemoveLast()
-    local prefix = ST.Sync.myName() .. "-"
     for _, r in ipairs(Store.Recent()) do
-        if r.id:sub(1, #prefix) == prefix then
+        if Store.Mine(r.id) then
             if r.ev.fake then
                 ST.db.events[r.id] = nil
             elseif not Store.Remove(r.id) then
@@ -173,11 +187,11 @@ function Store.IsDeleted(id)
     return ST.db.deleted ~= nil and ST.db.deleted[id] ~= nil
 end
 
--- Our own tombstones, newest first, at most `limit`.
+-- Our own tombstones (Store.Mine: on Zennit's account, those of any of his characters), newest first, at most `limit`.
 function Store.OwnTombstones(limit)
-    local prefix, list = ST.Sync.myName() .. "-", {}
+    local list = {}
     for id, t in pairs(ST.db.deleted or {}) do
-        if id:sub(1, #prefix) == prefix then list[#list + 1] = { id = id, t = t } end
+        if Store.Mine(id) then list[#list + 1] = { id = id, t = t } end
     end
     table.sort(list, function(a, b) return a.t > b.t end)
     for i = #list, (limit or #list) + 1, -1 do list[i] = nil end

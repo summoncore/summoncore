@@ -1132,9 +1132,12 @@ function Sync.OnMessage(text, channel, sender)
         return Sync.onReply(sender, unesc(qid), key, status, value)
 
     elseif typ == "T" then
-        -- the caster deleted this summon: nobody else can, so the sender must be the one named in the id
+        -- the caster deleted this summon: nobody else can, so the sender must be the one named in the id (or, for a summons
+        -- one of Zennit's characters wrote, any of his characters: his client deletes from whichever he is playing)
         local id = unesc(body)
-        if #id > 48 or id:sub(1, #sender + 1) ~= sender .. "-" then return "rejected:sender" end
+        local author = ST.Store.Author(id)
+        if #id > 48 or not author then return "rejected:sender" end
+        if author ~= sender and not (ST.Week.IsZennit(sender) and ST.Week.IsZennit(author)) then return "rejected:sender" end
         ST.db.deleted = ST.db.deleted or {}
         if ST.db.deleted[id] then return "kept" end
         ST.db.deleted[id] = time() -- a wall-clock time, like the caster's own tombstone (Store.Remove), not this session's GetTime
