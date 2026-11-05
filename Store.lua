@@ -25,6 +25,7 @@ function Store.Add(ev, localOnly)
     ev.assistants = ev.assistants or {}
     ev.time = ev.time or time()
     ev.wrote = ev.wrote or time()
+    if ev.subzone then ev.subzone = ST.Sync.Clip(ev.subzone, ST.Sync.MAX_SUBZONE) end -- keep what friends will receive
     ev.points, ev.kind = ST.Scoring.Score(ev.mapID, ev.subzone)
     local id = newID(ev.by or ev.caster, ev.time) -- a record Zennit's client filed for someone else starts with his name
     ST.db.events[id] = ev

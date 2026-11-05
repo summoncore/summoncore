@@ -1146,26 +1146,53 @@ add("a reset everyone was asked to make is asked again from the next HELLO; a pl
             tostring(passed:find(ST.ADMIN_HASH, 1, true) ~= nil))
 end)
 
-add("Zennit's alts are learned from his own client, and only a few", function()
-    local a, z = newClient("Alpha"), newClient("Zennit")
+add("Zennit's alts are learned from his own client, only with his stamp, and only a few, the same few everywhere", function()
+    local a, b, z = newClient("Alpha"), newClient("Beta"), newClient("Zennit")
     local savedGet, savedZennit = ST.bnGetInfo, ST.ZENNIT_HASH
     ST.ZENNIT_HASH = ST.TagHash("Zennit#1") -- a sample account stands in for his (its tag is not in the addon)
-    ST.bnGetInfo = function() return 1, "Zennit#1" end
-    local okHello, errHello = pcall(with, z, function() Sync.Hello() Sync.Pump(100000) end) -- messages only reach c.out once pumped
+    local out = {}
+    local ok, err = pcall(function()
+        ST.bnGetInfo = function() return 1, "Zennit#1" end
+        with(z, function() Sync.Hello() Sync.Pump(100000) end) -- messages only reach c.out once pumped
+        ST.bnGetInfo = savedGet
+        for _, m in ipairs(z.out) do if m.payload:match("^%d+~A~") then out.sentA = m.payload end end
+        if not out.sentA then error("Zennit's client did not announce itself") end
+        out.before = with(a, function() return ST.Week.IsZennit("Bankalt") end)
+        out.r1 = with(a, function() return Sync.OnMessage(out.sentA, "PARTY", "Bankalt") end)
+        out.r2 = with(a, function() return Sync.OnMessage(out.sentA, "PARTY", "Bankalt") end)
+        out.after = with(a, function() return ST.Week.IsZennit("Bankalt-SomeRealm") end)
+        out.other = with(a, function() return ST.Week.IsZennit("Gamma") end)
+        -- a friend's /run without his stamp (or a client before 0.29) names nobody
+        out.unstamped = with(a, function() return Sync.OnMessage("1~A~1", "PARTY", "Gamma") end)
+        out.gamma = with(a, function() return ST.Week.IsZennit("Gamma") end)
+        -- past the cap the list keeps the first by name, whatever order the names came in
+        local names = {}
+        for i = 1, 12 do names[#names + 1] = "Alt" .. string.char(96 + i) end -- Alta .. Altl
+        with(a, function() for i = 1, #names do out.capped = Sync.OnMessage(out.sentA, "PARTY", names[i]) end end)
+        with(b, function()
+            Sync.OnMessage(out.sentA, "PARTY", "Bankalt")
+            for i = #names, 1, -1 do Sync.OnMessage(out.sentA, "PARTY", names[i]) end
+        end)
+        out.listA = table.concat(a.db.settings.zenitAlts, ",")
+        out.listB = table.concat(b.db.settings.zenitAlts, ",")
+        -- and a friend who missed it all learns the list from anyone, by G (only with the stamp)
+        local c = newClient("Gamma")
+        with(a, function() Sync.SendAlts("Gamma") Sync.Pump(100000) end)
+        for _, m in ipairs(a.out) do
+            if m.payload:match("^%d+~G~") then out.g = with(c, function() return Sync.OnMessage(m.payload, "WHISPER", "Alpha") end) end
+        end
+        out.listC = table.concat(c.db.settings.zenitAlts or {}, ",")
+        out.forgedG = with(c, function() return Sync.OnMessage("1~G~00000000|Delta", "PARTY", "Alpha") end)
+    end)
     ST.bnGetInfo, ST.ZENNIT_HASH = savedGet, savedZennit
-    if not okHello then return false, tostring(errHello) end
-    local sentA
-    for _, m in ipairs(z.out) do if m.payload:match("^%d+~A~") then sentA = m.payload end end
-    if not sentA then return false, "Zennit's client did not announce itself" end
-    local before = with(a, function() return ST.Week.IsZennit("Bankalt") end)
-    local r1 = with(a, function() return Sync.OnMessage(sentA, "PARTY", "Bankalt") end)
-    local r2 = with(a, function() return Sync.OnMessage(sentA, "PARTY", "Bankalt") end)
-    local after = with(a, function() return ST.Week.IsZennit("Bankalt-SomeRealm") end)
-    local other = with(a, function() return ST.Week.IsZennit("Gamma") end)
-    local capped
-    with(a, function() for i = 1, 12 do capped = Sync.OnMessage(sentA, "PARTY", "Alt" .. i) end end)
-    return not before and r1 == "learned" and r2 == "kept" and after and not other and capped == "rejected:full",
-        string.format("before=%s %s %s after=%s other=%s capped=%s", tostring(before), r1, r2, tostring(after), tostring(other), tostring(capped))
+    if not ok then return false, tostring(err) end
+    local good = not out.before and out.r1 == "learned" and out.r2 == "kept" and out.after and not out.other
+        and out.unstamped == "rejected:stamp" and not out.gamma and out.capped == "rejected:full"
+        and out.listA == out.listB and #a.db.settings.zenitAlts == 10 and out.listA:find("Alta", 1, true) == 1
+        and out.g == "learned" and out.listC == out.listA and out.forgedG == "rejected:stamp"
+    return good, string.format("%s %s after=%s other=%s unstamped=%s capped=%s same=%s G=%s/%s forged=%s",
+        tostring(out.r1), tostring(out.r2), tostring(out.after), tostring(out.other), tostring(out.unstamped),
+        tostring(out.capped), tostring(out.listA == out.listB), tostring(out.g), tostring(out.listC == out.listA), tostring(out.forgedG))
 end)
 
 add("test summons are not counted in tallies or badge stats", function()
@@ -3161,6 +3188,197 @@ end)
 
 -- ===== [tests:SYNC] the sync handshake and Zennit's characters (0.29.0 review fixes) =====
 -- (new tests for this area go directly below this line)
+
+-- Puts n summons straight into a client's log (no broadcast, no badges): caster `who`, an hour apart from `from`.
+local function fill(c, who, n, from, over)
+    for i = 1, n do
+        local t = from + i * 3600
+        local ev = { caster = who, target = "Target", assistants = {}, mapID = 1436, subzone = "Sentinel Hill", time = t,
+            wrote = t, confirmed = true }
+        for k, v in pairs(over or {}) do ev[k] = v end
+        c.db.events[who .. "-" .. t] = ev
+    end
+end
+
+local function copyEvent(ev)
+    local out = {}
+    for k, v in pairs(ev) do out[k] = v end
+    out.assistants = { unpack(ev.assistants or {}) }
+    if ev.response then out.response = {} for k, v in pairs(ev.response) do out.response[k] = v end end
+    return out
+end
+
+add("logs that differ only in older summons converge (same count, same newest), both ways", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 1, BASE)          -- each has one the other lacks...
+    fill(b, "Beta", 1, BASE + 100)
+    fill(a, "Gamma", 1, BASE + 9000)   -- ...and both have the newest, so the counts and newest times match
+    for id, ev in pairs(a.db.events) do if ev.caster == "Gamma" then b.db.events[id] = copyEvent(ev) end end
+    with(a, function() Sync.Hello() end)
+    settle({ a, b })
+    local sa, na = signature(a)
+    local sb, nb = signature(b)
+    return sa == sb and na == 3, string.format("Alpha %d, Beta %d, same %s", na, nb, tostring(sa == sb))
+end)
+
+add("a log past 500 summons arrives whole, newest first, with nothing asked twice", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 520, BASE)
+    with(b, function() Sync.Hello() end)
+    local counts = settle({ a, b })
+    local _, nb = signature(b)
+    -- a client before 0.29 asks the old way and gets the newest 500
+    local first
+    with(a, function()
+        a.state.lastReq.Old = nil
+        Sync.OnMessage("1~R~0", "WHISPER", "Old")
+        first = a.state.bulk[1] and a.state.bulk[1].payload
+    end)
+    local newest = "Alpha-" .. (BASE + 520 * 3600)
+    -- at most the record at the cut is sent twice: the next request re-includes the second it was cut at
+    return nb == 520 and counts.B >= 520 and counts.B <= 521 and first and first:find(newest, 1, true) ~= nil,
+        string.format("Beta holds %d of 520 after %d B; old request starts with the newest: %s", nb, counts.B or 0,
+            tostring(first and first:find(newest, 1, true) ~= nil))
+end)
+
+add("an answer one client missed is noticed and fetched, though a later answer arrived", function()
+    local a, c = newClient("Alpha"), newClient("Carol")
+    fill(a, "Alpha", 2, BASE, { target = "Zennit" })
+    local ids = {}
+    for id in pairs(a.db.events) do ids[#ids + 1] = id end
+    table.sort(ids)
+    a.db.events[ids[1]].response = { result = "refused", zroll = 0, sroll = 0, time = BASE + 20000 }
+    a.db.events[ids[2]].response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 30000 }
+    for id, ev in pairs(a.db.events) do c.db.events[id] = copyEvent(ev) end
+    c.db.events[ids[1]].response = nil -- the Z for the first was lost; the later one arrived
+    with(c, function() Sync.Hello() end)
+    settle({ a, c })
+    local r = c.db.events[ids[1]].response
+    return r ~= nil and r.result == "refused", "Carol's answer to the first: " .. tostring(r and r.result)
+end)
+
+add("a reply is accepted however long it waits behind other replies, and live news goes before it", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 30, BASE)
+    with(b, function() Sync.OnMessage("1~H~" .. with(a, function() return Sync.Hello("WHISPER", "Beta") or a.state.queue[#a.state.queue].payload:match("^%d+~H~(.*)$") end), "WHISPER", "Alpha") end)
+    local req
+    for _, m in ipairs(b.state.queue) do if m.payload:match("^%d+~R~") then req = m.payload end end
+    if not req then return false, "no request" end
+    with(a, function()
+        a.state.queue = {}
+        Sync.OnMessage(req, "WHISPER", "Beta")
+        Store.Add({ caster = "Alpha", target = "Delta", assistants = {}, mapID = 1436, subzone = "", time = BASE + 999999,
+            confirmed = true }) -- a summons cast while the reply waits
+    end)
+    local sentFirst
+    with(a, function()
+        local saved = Sync.transport
+        Sync.transport = function(_, _, payload) sentFirst = sentFirst or payload end
+        Sync.Pump(1)
+        Sync.transport = saved
+    end)
+    clock = clock + 300 -- the reply leaves five minutes after the request (it waited behind others)
+    local added = 0
+    with(a, function() Sync.Pump(100000) end)
+    for _, m in ipairs(a.out) do
+        if m.payload:match("^%d+~B~") and m.target == "Beta" then
+            if with(b, function() return Sync.OnMessage(m.payload, "WHISPER", "Alpha") end) == "added" then added = added + 1 end
+        end
+    end
+    a.out = {}
+    return added == 30 and sentFirst and sentFirst:match("^%d+~E~") ~= nil,
+        string.format("added %d of 30 after 300 s; first out: %s", added, tostring(sentFirst and sentFirst:sub(1, 4)))
+end)
+
+add("a difference that cannot close is asked about once, not for ever", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Gamma", 40, BASE)
+    for id, ev in pairs(a.db.events) do b.db.events[id] = copyEvent(ev) end
+    -- Gamma deleted one: the tombstone reached Alpha only, and Gamma is away, so Beta keeps it and Alpha refuses it
+    local gone = "Gamma-" .. (BASE + 3600)
+    a.db.events[gone] = nil
+    a.db.deleted = { [gone] = BASE }
+    with(a, function() Sync.Hello() end)
+    local first = settle({ a, b })
+    with(a, function() Sync.Hello() end)
+    with(b, function() Sync.Hello() end)
+    local again = settle({ a, b })
+    return (again.B or 0) == 0 and (again.R or 0) == 0 and (first.B or 0) <= 80,
+        string.format("first exchange B=%d R=%d; the same hellos again: B=%d R=%d", first.B or 0, first.R or 0, again.B or 0, again.R or 0)
+end)
+
+add("Zennit's own client counts the alt it plays, and a friend who missed it learns it at the next hello", function()
+    local a, b, z = newClient("Alpha"), newClient("Beta"), newClient("Zenalt")
+    local savedGet, savedZennit = ST.bnGetInfo, ST.ZENNIT_HASH
+    ST.ZENNIT_HASH = ST.TagHash("Zennit#1")
+    local out = {}
+    local ok, err = pcall(function()
+        ST.bnGetInfo = function() return 1, "Zennit#1" end
+        out.own = with(z, function() return ST.Week.IsZennit("Zenalt") end)
+        with(z, function() Sync.Hello() end)
+        ST.bnGetInfo = savedGet
+        settle({ z, a })                 -- Alpha hears him; Beta is away
+        out.alpha = with(a, function() return ST.Week.IsZennit("Zenalt") end)
+        out.betaBefore = with(b, function() return ST.Week.IsZennit("Zenalt") end)
+        with(b, function() Sync.Hello() end)
+        settle({ a, b })                 -- Beta's logs match Alpha's, but the fingerprints do not
+        out.beta = with(b, function() return ST.Week.IsZennit("Zenalt") end)
+        -- and an answer from his alt counts as his
+        fill(a, "Alpha", 1, BASE, { target = "Zennit" })
+        local id = next(a.db.events)
+        out.z = with(a, function() return Sync.OnMessage(string.format("1~Z~%s|accepted|0|0|%d", id, BASE + 99), "PARTY", "Zenalt") end)
+        out.stranger = with(a, function() return Sync.OnMessage(string.format("1~Z~%s|refused|0|0|%d", id, BASE + 199), "PARTY", "Beta") end)
+    end)
+    ST.bnGetInfo, ST.ZENNIT_HASH = savedGet, savedZennit
+    if not ok then return false, tostring(err) end
+    return out.own and out.alpha and not out.betaBefore and out.beta and out.z == "applied" and out.stranger == "rejected:sender",
+        string.format("own %s, Alpha %s, Beta %s then %s, answer from his alt %s, from a friend %s", tostring(out.own),
+            tostring(out.alpha), tostring(out.betaBefore), tostring(out.beta), tostring(out.z), tostring(out.stranger))
+end)
+
+add("two answers made in the same second: every client keeps the same one, whatever order they arrive in", function()
+    local x, y = newClient("Xena"), newClient("Yuri")
+    local id, ev = sample({ target = "Zennit" })
+    local acc, ref = copyEvent(ev), copyEvent(ev)
+    acc.response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 50 }
+    ref.response = { result = "refused", zroll = 0, sroll = 0, time = BASE + 50 }
+    with(x, function() Sync.Merge(id, copyEvent(acc), "Beta", false) Sync.Merge(id, copyEvent(ref), "Beta", false) end)
+    with(y, function() Sync.Merge(id, copyEvent(ref), "Beta", false) Sync.Merge(id, copyEvent(acc), "Beta", false) end)
+    local rx, ry = x.db.events[id].response.result, y.db.events[id].response.result
+    return rx == ry, rx .. " / " .. ry
+end)
+
+add("a subzone cut for the wire never splits a letter, and the caster keeps what friends receive", function()
+    local long = "Пещеры Стенаний и Подземелья" -- 53 bytes; byte 40 is the first half of a letter
+    local clipped = Sync.Clip(long, 40)
+    local whole = clipped:find("[\192-\255]$") == nil and #clipped <= 40 and long:sub(1, #clipped) == clipped
+    local a, b = newClient("Alpha"), newClient("Beta")
+    local id = cast(a, 1, false, { subzone = long })
+    settle({ a, b })
+    local mine, theirs = a.db.events[id].subzone, b.db.events[id] and b.db.events[id].subzone
+    return whole and mine == theirs and mine == clipped, string.format("%d bytes, whole letters %s, same on both %s", #clipped,
+        tostring(whole), tostring(mine == theirs))
+end)
+
+add("a client before 0.29 still reads our hello, and we still answer its hello and request the old way", function()
+    local a = newClient("Alpha")
+    fill(a, "Alpha", 3, BASE)
+    local body = with(a, function()
+        Sync.Hello("WHISPER", "Old")
+        return a.state.queue[#a.state.queue].payload:match("^%d+~H~(.*)$")
+    end)
+    -- the pattern a 0.28 client reads a hello with
+    local count, latest, respT, reset, mark, stamp = body:match("^(%d+)|(%d+)|[^|]*|?(%d*)|?(%d*)|?(%d*)|?(%x*)")
+    local oldReads = count == "3" and tonumber(latest) == BASE + 3 * 3600 and respT == "0" and reset == "0" and mark == "0" and stamp == ""
+    -- its hello (no fingerprint) gets an old request, which it can read
+    local b = newClient("Beta")
+    local r = with(b, function() return Sync.OnMessage("1~H~3|" .. (BASE + 3 * 3600) .. "|0.28.1|0|0|0", "PARTY", "Old") end)
+    local req
+    for _, m in ipairs(b.state.queue) do if m.payload:match("^%d+~R~") then req = m.payload end end
+    return oldReads and r:find("request", 1, true) ~= nil and req == "1~R~0",
+        string.format("0.28 reads %s/%s/%s/%s/%s/'%s'; old hello -> %s, request %s", tostring(count), tostring(latest), tostring(respT),
+            tostring(reset), tostring(mark), tostring(stamp), tostring(r), tostring(req))
+end)
 -- ===== [end tests:SYNC] =====
 
 

@@ -182,25 +182,35 @@ Sync shares events, not totals, so merging is a set union and nothing is double-
 `SUMMONSYNC` prefix: `H` (hello), `E` (new event, broadcast), `R` (request, whispered), `B` (batch,
 whispered, one record each, about 3 per second). Others: `Z` (Zennit's answer), `D` and `S` (the dice),
 `T` (a summon its caster deleted), `K` (a summon card Zennit sold), `A` (Zennit's client names the character he is playing, so others learn his
-alts), `X` (a request to reset), `F` (how a player felt about a week, kept only by Zennit's and the admin's clients), `V` (a chapter shown to the group, party or raid only), `L` (a line Zennit wrote for himself: a postcard or his out-of-office, only from his characters, the newest kept) `W` (what a group member saw of a ritual, kept only by Zennit's client: see below), `Q` and `Y` (a question for Zennit's client, sent to the group and the guild, and his answer whispered back to whoever asked: `/sc ask`) and `C` (the admin started or stopped
+alts; it carries his account's stamp), `G` (every client passes on the characters it knows are his, with the same stamp), `N` (the end of a
+reply to a request), `X` (a request to reset), `F` (how a player felt about a week, kept only by Zennit's and the admin's clients), `V` (a chapter shown to the group, party or raid only), `L` (a line Zennit wrote for himself: a postcard or his out-of-office, only from his characters, the newest kept) `W` (what a group member saw of a ritual, kept only by Zennit's client: see below), `Q` and `Y` (a question for Zennit's client, sent to the group and the guild, and his answer whispered back to whoever asked: `/sc ask`) and `C` (the admin started or stopped
 a season: see [The season](#the-season)). AceComm, LibSerialize and LibDeflate are not used; the addon has its own
 small encoder and send queue.
 
 A `H` carries the number of summons, the latest summon time, the version, the time of the newest answer from
-Zennit, the newest reset everyone was asked to make (with the admin's stamp; a player's own reset is never sent) and the time of
-the newest season mark, so a peer notices a missing summon, a changed answer, a missed reset or a missed season start or stop
-(season marks are sent in reply to its `R`).
+Zennit, the newest reset everyone was asked to make (with the admin's stamp; a player's own reset is never sent), the time of
+the newest season mark and, from 0.29, a fingerprint: a sum of a hash of every summons as it travels (with its answer), every
+season mark and every character known to be Zennit's. Two clients with the same log have the same fingerprint, whatever order
+they heard things in, so any difference shows, an older summons or an older answer included, whoever holds more. When they
+differ, each asks the other. Its `R` lists its own sums week by week (twenty weeks, and one for everything older), and the reply
+is only the weeks that differ, newest first, ending with an `N`; a reply cut short at 500 summons is followed by a request for the
+part before the cut, so a long log arrives whole. A request that brought nothing is not repeated for the same pair of
+fingerprints for ten minutes, so a difference that cannot close (a summons one side refuses) costs one exchange, not a loop.
+Season marks, cards, tombstones and Zennit's characters are sent with every reply. A friend still on 0.28 gets the old exchange
+(everything since the last reset, newest first). Replies wait behind everything else in the send queue, so a new summons or an
+answer from Zennit is never stuck behind a newcomer's history.
 
 Merge rules:
 - Same event ID: keep the confirmed copy; if both are (or neither is), keep the earlier write.
 - Your own events are authoritative and nobody can add one against you.
 - A live `E` is accepted only if the sender is the caster, or, for a record Zennit's client filed (a 12th field names him), Zennit.
   Only the summoned can file one, and only a summons of himself.
-- A `B` is accepted only by whisper and only soon after you sent a `R` to that sender (the window renews with
-  each batch message, so a long log still arrives whole).
+- A `B` is accepted only by whisper and only within fifteen minutes of sending a `R` to that sender (the window renews with
+  each batch message; it is long because a reply can wait behind replies to others).
 - A deleted summon stays deleted: only its caster can send the `T`, and a copy of it is refused afterwards.
 - Anything from before the last reset is refused.
-- Of two answers from Zennit for one summon, the later wins.
+- Of two answers from Zennit for one summon, the later wins; two made in the same second are decided by what they say, so every
+  client keeps the same one. An answer counts from any of his characters.
 - Points and kind are recomputed locally, never read from the wire.
 - Messages from a newer protocol major version are ignored.
 
@@ -573,5 +583,6 @@ A week closes two days after it ends. Zennit can then no longer answer a summon 
 the close (the silver of a summons he asked silver for can still be paid, which moves no points). The week's result is worked out
 from the log, never frozen on one client, so every client that holds the same log agrees on it; a summons made in the week that
 reaches a client late still counts, the same way everywhere. Zennit's alts are learned over
-sync: his own client announces the character he is playing, and everyone else scores a summon of any of them as a summon of
-Zennit (up to 10 alts are kept).
+sync: his own client announces the character he is playing (and counts it as his itself), every client passes on the ones it
+knows, and everyone scores a summon of any of them as a summon of Zennit. Up to 10 alts are kept, the first 10 by name, so every
+client keeps the same ones.

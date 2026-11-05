@@ -20,7 +20,9 @@ function Week.Start(t)
     return t - ((t - MONDAY) % LENGTH)
 end
 
--- Zennit's characters: the listed names, plus the alts his own client has announced over sync (settings.zenitAlts).
+-- Zennit's characters: the listed names, plus the alts his own client has announced over sync (settings.zenitAlts). On his
+-- own account the character he is playing is his too, whatever the lists say: before 0.29 his client never counted an alt he
+-- was playing, so it scored summons of that alt as summons of anyone, and disagreed with everyone else.
 local function isZennit(name)
     local base = ST.baseName(name)
     if not base then return false end
@@ -30,7 +32,8 @@ local function isZennit(name)
             if ST.baseName(n) and ST.baseName(n):lower() == base:lower() then return true end
         end
     end
-    return false
+    local me = ST.Sync and ST.baseName(ST.Sync.myName())
+    return me ~= nil and me:lower() == base:lower() and ST.IsZennitAccount()
 end
 Week.IsZennit = isZennit
 
@@ -189,6 +192,7 @@ local zennitKnown, zennitNames = {}, nil -- isZennit by target, while his names 
 local function raceStamp()
     local s = ST.db.settings
     local names = table.concat(s and s.zenitNames or { "Zennit" }, ",") .. ";" .. table.concat(s and s.zenitAlts or {}, ",")
+        .. (ST.IsZennitAccount() and (";" .. tostring(ST.Sync.myName())) or "") -- his own client counts the character he plays
     if names ~= zennitNames then zennitKnown, zennitNames = {}, names end
     local n, times, answers, marked = 0, 0, 0, 0
     for _, ev in pairs(ST.db.events) do
