@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.28.1, work in progress**. See [Status](#status) for what has and has
+Status: **v0.29.0, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -382,7 +382,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Area | State |
 |---|---|
 | Skeleton, diagnostics panel, store, tallies, scoring, badges, panel, Zennit gag | Verified in the live client (solo, with `/sc fake`) |
-| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 116 tests now; the ones added since (0.27 and 0.28) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
+| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 145 tests now; the ones added since (0.27, 0.28 and 0.29) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
 | The live-client checklist (`/sc check`, `design/verification.md`) | The automatic checks passed in the live client on 2026-10-06. The checks done with a friend are still to do: they are how the rest of this table gets confirmed |
 | Real Ritual of Summoning detection | Verified in the live client (with Poogs): the detector fired and the summons synced. Not yet confirmed: when the game reports the ritual done, which decides whether helpers are seen without the prompt (run one with `/sc debug` on the caster's client). Summons by a caster without the addon are filed by Zennit's client (never run live); what a target presses on the game's own summon prompt is read by hooking `C_SummonInfo` (written, never run live); raid helpers in other subgroups are checked now but not yet tried in a raid |
 | Addon messages between two real clients | Verified: party, guild and whisper pings and replies arrive. Names show as `Name Surname` here (not `Name-Realm`), so the addon compares plain first-word names |
@@ -396,6 +396,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Gag and voice clips | The gag is an original drawing (`Media/gag_wag_sheet.tga`) with Zennit's recorded line and 13 recorded party lines. The voice clip categories are silent: the one take so far is in no category |
 | Release | Published on GitHub (v0.22.0, v0.25.3, v0.26.0) and, from v0.26.0, on CurseForge. Actions > Release publishes the TOC's version; a release zip carries whatever clips are committed |
 | 0.28.1: resets, closed weeks, the silver watcher, BattleTag hashes | Checked outside the game only (the self-test and a headless run) |
+| 0.29.0: the review of counting and sync (sync fingerprints and week-by-week requests, Zennit's characters shared, each summons filed once, the race fixes, undo, cards, resets, per-character badges) | Checked outside the game only (the self-test, 145/145, and simulated clients). A friend on 0.28 still syncs the old way, but no longer teaches a 0.29 client Zennit's alts until his own client is on 0.29 |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.

@@ -2,7 +2,7 @@ local ADDON, ST = ...
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.28.1"
+ST.version = "0.29.0"
 
 local DB_VERSION = 1
 
@@ -194,9 +194,6 @@ local function initDB()
     db.settings.zenitNames = names
     db.harness = db.harness or {}
     ST.db = db
-    -- this character's badges, worked out quietly now if it has none kept yet (Scoring.Badges), so its next summons is
-    -- what announces a new one
-    if ST.Store.me() then ST.Scoring.Badges(ST.Store.me()) end
 end
 
 local frame = CreateFrame("Frame")
@@ -208,6 +205,9 @@ frame:SetScript("OnEvent", ST.Safe("the login", function(_, event, arg1)
         -- Remember what the previous session left behind for the save/reload test.
         ST.previousToken = ST.db.harness.token
     elseif event == "PLAYER_LOGIN" then
+        -- this character's badges, worked out quietly now if it has none kept yet (Scoring.Badges), so its next summons is
+        -- what announces a new one; at login, once the character and the rest of the addon are ready
+        if ST.Store.me() then ST.Guard("the badges at login", ST.Scoring.Badges, ST.Store.me()) end
         if ST.OnLogin then ST.OnLogin() end
         print_("loaded v" .. ST.version .. ". /sc for commands.")
     end
