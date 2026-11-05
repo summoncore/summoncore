@@ -76,7 +76,11 @@ Week.RULES = { from = 1791158400, headstart = 2, minimum = 5, cap = 10, dice = 3
     writs = 2,
     -- Free declines (design/lenses.md, Balance): the first decline he really makes in a week costs nothing and the summons does not
     -- happen. Every later one costs him its points: a free decline with no limit would let him decide every week (Balance).
-    declines = 1 }
+    declines = 1,
+    -- From the week of Monday 9 November 2026 (UTC), a week has a winner only if at least one summons of Zennit was filed in it.
+    -- Only summons of him count, so summons of each other do not start the race: a week nobody summoned him has no winner, as a
+    -- week with no summons at all has none. Earlier weeks keep the results they were played under (Week.RaceNeedsHim).
+    needsHim = 1794182400 }
 
 -- Each whim moves one rule for one week, by a few points of the group's chance (about +6 or -5 in a normal week), so no
 -- week is much easier or harder than another. `show` is the rule whose number the text names, when it does.
@@ -127,6 +131,11 @@ end
 
 function Week.NewRules(start)
     return start >= Week.RULES.from
+end
+
+-- Does the week starting at `start` need a summons of Zennit to have a winner? (Week.RULES.needsHim)
+function Week.RaceNeedsHim(start)
+    return Week.NewRules(start) and start >= Week.RULES.needsHim
 end
 
 -- Seasons started and stopped by the admin (/sc season start|stop). A stop ends the season in progress at once, with no
@@ -209,8 +218,8 @@ local function raceStamp()
     end
     for _, m in pairs(ST.db.seasonMarks or {}) do marked = marked + m.time * 2 + (m.kind == "start" and 1 or 0) end
     local R = Week.RULES
-    return string.format("%d:%.0f:%.0f:%.0f:%s:%s:%s:%s:%s", n, times, answers, marked, tostring(R.from), tostring(R.headstart),
-        tostring(R.minimum), tostring(R.cap), names)
+    return string.format("%d:%.0f:%.0f:%.0f:%s:%s:%s:%s:%s:%s", n, times, answers, marked, tostring(R.from), tostring(R.headstart),
+        tostring(R.minimum), tostring(R.cap), tostring(R.needsHim), names)
 end
 local offKnown, offStamp = {}, nil
 
@@ -375,15 +384,16 @@ function Week.Overdue(start)
     return Week.Unanswered(start, Week.RULES.overdue)
 end
 
--- The summon Zennit can close the Index on, in the week starting at `start` (nil if he can't yet): the latest
--- answered summon that counts, once at least `minimum` have been filed.
+-- The summon Zennit can close the Index on, in the week starting at `start` (nil if he can't yet): the latest summon that
+-- counts, once at least `minimum` have been filed and the latest of them answered (README). A close cuts the count at the
+-- summons it is made on, so closing on an earlier one while a later one waits for his answer would take away summons made
+-- before the close, which count as accepted.
 function Week.CloseTarget(start)
     if not Week.NewRules(start) then return nil end
     local list, counted, closed = filed(start)
     if closed or counted < Week.RULES.minimum then return nil end
-    for i = counted, Week.RULES.minimum, -1 do
-        if list[i].ev.response then return list[i].id, list[i].ev end
-    end
+    if not (list[counted].ev.response and list[#list].ev.response) then return nil end
+    return list[counted].id, list[counted].ev
 end
 
 -- Does this summon count toward its week? Under the new rules: a summon of Zennit among those filed (a test summon is
@@ -467,13 +477,17 @@ function Week.Score(start)
             end
         end
     end
-    if r.summons > 0 and not r.off and not r.paused then r.winner = r.zennit >= r.group and "zennit" or "group" end
+    -- from RULES.needsHim, summons of each other do not start the race: no summons of him filed, no winner
+    local raced = r.summons > 0 and not (Week.RaceNeedsHim(start) and r.counted + r.extra == 0)
+    if raced and not r.off and not r.paused then r.winner = r.zennit >= r.group and "zennit" or "group" end
     return r
 end
 
--- Is Zennit on his week off right now? True when he won last week. Returns the end time as the second value.
+-- Is Zennit on his week off right now? True when he won last week. Returns the end time as the second value. Under the
+-- new rules it is Week.IsOff, so a season started or stopped this week (no week off carried over) is not called his leave.
 function Week.Immune(now)
     local current = Week.Start(now)
+    if Week.NewRules(current) then return Week.IsOff(current), current + LENGTH end
     local last = Week.Score(current - LENGTH)
     return last.winner == "zennit", current + LENGTH
 end
@@ -501,6 +515,10 @@ function Week.Describe(r)
             ", and the race skipped the week"
     end
     if r.summons == 0 then return "no summons that week" end
+    if Week.RaceNeedsHim(r.start) and r.counted + r.extra == 0 then
+        return r.over and "nobody summoned Zennit that week, so the race had no winner" or
+            "this week so far: nobody has summoned Zennit, and the race starts with the first summons of him"
+    end
     if not r.over then
         return "this week so far: " .. lines(r) .. (r.zennit >= r.group and ", Zennit is ahead" or ", the group is ahead")
     end
