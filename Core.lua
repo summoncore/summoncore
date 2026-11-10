@@ -2,7 +2,7 @@ local ADDON, ST = ...
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.32.0"
+ST.version = "0.30.0"
 
 local DB_VERSION = 1
 
@@ -205,6 +205,9 @@ frame:SetScript("OnEvent", ST.Safe("the login", function(_, event, arg1)
         -- Remember what the previous session left behind for the save/reload test.
         ST.previousToken = ST.db.harness.token
     elseif event == "PLAYER_LOGIN" then
+        -- this character's badges, worked out quietly now if it has none kept yet (Scoring.Badges), so its next summons is
+        -- what announces a new one; at login, once the character and the rest of the addon are ready
+        if ST.Store.me() then ST.Guard("the badges at login", ST.Scoring.Badges, ST.Store.me()) end
         if ST.OnLogin then ST.OnLogin() end
         print_("loaded v" .. ST.version .. ". /sc for commands.")
     end
@@ -430,7 +433,7 @@ end
 function commands.badges()
     if ST.Gag.Blocked() then return end
     for _, b in ipairs(ST.Scoring.badges) do
-        local got = ST.db.badges[b.id]
+        local got = ST.Scoring.Badges()[b.id]
         print_(string.format("%s %s%s", got and "|cff33ff66[x]|r" or "[ ]", b.name,
             got and (" (" .. fmtTime(got.earned) .. ")") or (b.how and (": " .. b.how) or "")))
     end

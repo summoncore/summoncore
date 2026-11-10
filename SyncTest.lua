@@ -684,8 +684,9 @@ add("points only count for summons that land", function()
         tally = ST.Store.Tallies().Alpha
         stats = ST.Store.Stats("Alpha")
     end)
-    -- accepted, owed (the silver goes on a tab), paid, lost and the unanswered one land: 5 summons x 3 points
-    return tally.cast == 7 and tally.points == 15 and stats.cast == 5,
+    -- accepted, owed (the silver goes on a tab), paid, lost and the unanswered one land: 5 summons x 3 points, and only they
+    -- are counted as cast (README: points, tallies and badges only count summons that land)
+    return tally.cast == 5 and tally.points == 15 and stats.cast == 5,
         string.format("cast=%d points=%d landed=%d", tally.cast, tally.points, stats.cast)
 end)
 
@@ -1146,26 +1147,53 @@ add("a reset everyone was asked to make is asked again from the next HELLO; a pl
             tostring(passed:find(ST.ADMIN_HASH, 1, true) ~= nil))
 end)
 
-add("Zennit's alts are learned from his own client, and only a few", function()
-    local a, z = newClient("Alpha"), newClient("Zennit")
+add("Zennit's alts are learned from his own client, only with his stamp, and only a few, the same few everywhere", function()
+    local a, b, z = newClient("Alpha"), newClient("Beta"), newClient("Zennit")
     local savedGet, savedZennit = ST.bnGetInfo, ST.ZENNIT_HASH
     ST.ZENNIT_HASH = ST.TagHash("Zennit#1") -- a sample account stands in for his (its tag is not in the addon)
-    ST.bnGetInfo = function() return 1, "Zennit#1" end
-    local okHello, errHello = pcall(with, z, function() Sync.Hello() Sync.Pump(100000) end) -- messages only reach c.out once pumped
+    local out = {}
+    local ok, err = pcall(function()
+        ST.bnGetInfo = function() return 1, "Zennit#1" end
+        with(z, function() Sync.Hello() Sync.Pump(100000) end) -- messages only reach c.out once pumped
+        ST.bnGetInfo = savedGet
+        for _, m in ipairs(z.out) do if m.payload:match("^%d+~A~") then out.sentA = m.payload end end
+        if not out.sentA then error("Zennit's client did not announce itself") end
+        out.before = with(a, function() return ST.Week.IsZennit("Bankalt") end)
+        out.r1 = with(a, function() return Sync.OnMessage(out.sentA, "PARTY", "Bankalt") end)
+        out.r2 = with(a, function() return Sync.OnMessage(out.sentA, "PARTY", "Bankalt") end)
+        out.after = with(a, function() return ST.Week.IsZennit("Bankalt-SomeRealm") end)
+        out.other = with(a, function() return ST.Week.IsZennit("Gamma") end)
+        -- a friend's /run without his stamp (or a client before 0.29) names nobody
+        out.unstamped = with(a, function() return Sync.OnMessage("1~A~1", "PARTY", "Gamma") end)
+        out.gamma = with(a, function() return ST.Week.IsZennit("Gamma") end)
+        -- past the cap the list keeps the first by name, whatever order the names came in
+        local names = {}
+        for i = 1, 12 do names[#names + 1] = "Alt" .. string.char(96 + i) end -- Alta .. Altl
+        with(a, function() for i = 1, #names do out.capped = Sync.OnMessage(out.sentA, "PARTY", names[i]) end end)
+        with(b, function()
+            Sync.OnMessage(out.sentA, "PARTY", "Bankalt")
+            for i = #names, 1, -1 do Sync.OnMessage(out.sentA, "PARTY", names[i]) end
+        end)
+        out.listA = table.concat(a.db.settings.zenitAlts, ",")
+        out.listB = table.concat(b.db.settings.zenitAlts, ",")
+        -- and a friend who missed it all learns the list from anyone, by G (only with the stamp)
+        local c = newClient("Gamma")
+        with(a, function() Sync.SendAlts("Gamma") Sync.Pump(100000) end)
+        for _, m in ipairs(a.out) do
+            if m.payload:match("^%d+~G~") then out.g = with(c, function() return Sync.OnMessage(m.payload, "WHISPER", "Alpha") end) end
+        end
+        out.listC = table.concat(c.db.settings.zenitAlts or {}, ",")
+        out.forgedG = with(c, function() return Sync.OnMessage("1~G~00000000|Delta", "PARTY", "Alpha") end)
+    end)
     ST.bnGetInfo, ST.ZENNIT_HASH = savedGet, savedZennit
-    if not okHello then return false, tostring(errHello) end
-    local sentA
-    for _, m in ipairs(z.out) do if m.payload:match("^%d+~A~") then sentA = m.payload end end
-    if not sentA then return false, "Zennit's client did not announce itself" end
-    local before = with(a, function() return ST.Week.IsZennit("Bankalt") end)
-    local r1 = with(a, function() return Sync.OnMessage(sentA, "PARTY", "Bankalt") end)
-    local r2 = with(a, function() return Sync.OnMessage(sentA, "PARTY", "Bankalt") end)
-    local after = with(a, function() return ST.Week.IsZennit("Bankalt-SomeRealm") end)
-    local other = with(a, function() return ST.Week.IsZennit("Gamma") end)
-    local capped
-    with(a, function() for i = 1, 12 do capped = Sync.OnMessage(sentA, "PARTY", "Alt" .. i) end end)
-    return not before and r1 == "learned" and r2 == "kept" and after and not other and capped == "rejected:full",
-        string.format("before=%s %s %s after=%s other=%s capped=%s", tostring(before), r1, r2, tostring(after), tostring(other), tostring(capped))
+    if not ok then return false, tostring(err) end
+    local good = not out.before and out.r1 == "learned" and out.r2 == "kept" and out.after and not out.other
+        and out.unstamped == "rejected:stamp" and not out.gamma and out.capped == "rejected:full"
+        and out.listA == out.listB and #a.db.settings.zenitAlts == 10 and out.listA:find("Alta", 1, true) == 1
+        and out.g == "learned" and out.listC == out.listA and out.forgedG == "rejected:stamp"
+    return good, string.format("%s %s after=%s other=%s unstamped=%s capped=%s same=%s G=%s/%s forged=%s",
+        tostring(out.r1), tostring(out.r2), tostring(out.after), tostring(out.other), tostring(out.unstamped),
+        tostring(out.capped), tostring(out.listA == out.listB), tostring(out.g), tostring(out.listC == out.listA), tostring(out.forgedG))
 end)
 
 add("test summons are not counted in tallies or badge stats", function()
@@ -1401,6 +1429,8 @@ add("the new race: only summons of Zennit count, ten a week, and a summon to his
         local a = newClient("Alpha")
         local W = ST.Week
         local out = {}
+        local needsHim = W.RULES.needsHim
+        W.RULES.needsHim = 0 -- the rule is on for last week whatever today's date (it began on a fixed day)
         with(a, function()
             local last = W.Start() - 7 * 86400
             local function put(key, n, target, pts)
@@ -1418,8 +1448,10 @@ add("the new race: only summons of Zennit count, ten a week, and a summon to his
             a.db.events.z1.response = { result = "accepted", zroll = 0, sroll = 0, time = last + 99999, listed = true }
             out.listed = W.Score(last)
         end)
+        W.RULES.needsHim = needsHim
         local f, s, l = out.friends, out.six, out.listed
-        local ok = f.group == 0 and f.zennit == W.RULES.headstart and f.winner == "zennit"
+        -- with no summons of him the race has not started, so nobody wins (Week.RULES.needsHim)
+        local ok = f.group == 0 and f.zennit == W.RULES.headstart and f.winner == nil
             and s.counted == 10 and s.extra == 1 and s.group == 30 and s.winner == "group"
             and out.first and not out.sixth and out.enthusiasm and l.zennit == W.RULES.headstart + 3 and l.group == 30
         return ok, string.format("friends %d-%d, eleven: %d counted, %d extra, %d-%d, listed: Zennit %d, enthusiasm %s",
@@ -1462,7 +1494,8 @@ add("closing the Index: allowed after five answered, it travels to everyone, and
     return newRules(function()
         local W, z, a = ST.Week, newClient("Zennit"), newClient("Alpha")
         local ids = {}
-        for n = 1, 7 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
+        -- five summons before the close; the sixth and seventh come after it (he can only close once the latest is answered)
+        for n = 1, 5 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
         settle({ a, z })
         local start = W.Start(BASE + 961)
         local out = {}
@@ -1478,6 +1511,7 @@ add("closing the Index: allowed after five answered, it travels to everyone, and
             out.again = W.CloseTarget(start) -- once closed, it can't be closed again
             ST.Respond.Decide(ids[5], "accepted") -- a changed answer keeps the Index closed
         end)
+        for n = 6, 7 do ids[n] = cast(a, 960 + n, false, { target = "Zennit", assistants = {}, points = 3 }) end
         settle({ a, z })
         local rz = with(z, function() return W.Score(start) end)
         local ra = with(a, function() return W.Score(start) end)
@@ -1739,19 +1773,19 @@ add("snowballs: a throw at Zennit is counted by the thrower's client and told to
             S.OnCast("UNIT_SPELLCAST_SUCCEEDED", "player", "guid-5", S.SPELL_ID)
             out.mine = S.Mine()
             for _, m in ipairs(#a.out > 0 and a.out or Sy.state.queue) do
-                local body = m.payload:match("^%d+~N~(.*)$")
+                local body = m.payload:match("^%d+~O~(.*)$")
                 if body then sent[#sent + 1] = body end
             end
             out.aBoard = S.Board()
-            out.fromZennit = Sy.OnMessage("1~N~5|5|0|" .. time() .. "|1", "PARTY", "Zennit") -- he cannot hit himself
+            out.fromZennit = Sy.OnMessage("1~O~5|5|0|" .. time() .. "|1", "PARTY", "Zennit") -- he cannot hit himself
         end)
         local before = #printed
         with(z, function()
             z.db.settings.zenitNames = { "Zennit" }
-            for _, body in ipairs(sent) do out.heard = Sy.OnMessage("1~N~" .. body, "PARTY", "Alpha") end
+            for _, body in ipairs(sent) do out.heard = Sy.OnMessage("1~O~" .. body, "PARTY", "Alpha") end
             out.said = #printed - before
-            out.bad = Sy.OnMessage("1~N~1|9|0|" .. time() .. "|0", "PARTY", "Bo")
-            out.older = Sy.OnMessage("1~N~1|0|0|1|0", "PARTY", "Alpha")
+            out.bad = Sy.OnMessage("1~O~1|9|0|" .. time() .. "|0", "PARTY", "Bo")
+            out.older = Sy.OnMessage("1~O~1|0|0|1|0", "PARTY", "Alpha")
             out.zBoard = S.Board()
             out.lines = table.concat(ST.Leaders.Lines(), " ")
         end)
@@ -3382,6 +3416,849 @@ add("a question reaches only Zennit's client, which answers it by whisper; off, 
         tostring(out.notHim), tostring(out.stranger), tostring(out.nothing), tostring(out.open), tostring(out.badStatus),
         tostring(out.timeout and out.timeout.status), tostring(out.late), tostring(out.self and out.self.value))
 end)
+
+-- ===== [tests:SYNC] the sync handshake and Zennit's characters (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+
+-- Puts n summons straight into a client's log (no broadcast, no badges): caster `who`, an hour apart from `from`.
+local function fill(c, who, n, from, over)
+    for i = 1, n do
+        local t = from + i * 3600
+        local ev = { caster = who, target = "Target", assistants = {}, mapID = 1436, subzone = "Sentinel Hill", time = t,
+            wrote = t, confirmed = true }
+        for k, v in pairs(over or {}) do ev[k] = v end
+        c.db.events[who .. "-" .. t] = ev
+    end
+end
+
+local function copyEvent(ev)
+    local out = {}
+    for k, v in pairs(ev) do out[k] = v end
+    out.assistants = { unpack(ev.assistants or {}) }
+    if ev.response then out.response = {} for k, v in pairs(ev.response) do out.response[k] = v end end
+    return out
+end
+
+add("logs that differ only in older summons converge (same count, same newest), both ways", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 1, BASE)          -- each has one the other lacks...
+    fill(b, "Beta", 1, BASE + 100)
+    fill(a, "Gamma", 1, BASE + 9000)   -- ...and both have the newest, so the counts and newest times match
+    for id, ev in pairs(a.db.events) do if ev.caster == "Gamma" then b.db.events[id] = copyEvent(ev) end end
+    with(a, function() Sync.Hello() end)
+    settle({ a, b })
+    local sa, na = signature(a)
+    local sb, nb = signature(b)
+    return sa == sb and na == 3, string.format("Alpha %d, Beta %d, same %s", na, nb, tostring(sa == sb))
+end)
+
+add("a log past 500 summons arrives whole, newest first, with nothing asked twice", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 520, BASE)
+    with(b, function() Sync.Hello() end)
+    local counts = settle({ a, b })
+    local _, nb = signature(b)
+    -- a client before 0.29 asks the old way and gets the newest 500
+    local first
+    with(a, function()
+        a.state.lastReq.Old = nil
+        Sync.OnMessage("1~R~0", "WHISPER", "Old")
+        first = a.state.bulk[1] and a.state.bulk[1].payload
+    end)
+    local newest = "Alpha-" .. (BASE + 520 * 3600)
+    -- at most the record at the cut is sent twice: the next request re-includes the second it was cut at
+    return nb == 520 and counts.B >= 520 and counts.B <= 521 and first and first:find(newest, 1, true) ~= nil,
+        string.format("Beta holds %d of 520 after %d B; old request starts with the newest: %s", nb, counts.B or 0,
+            tostring(first and first:find(newest, 1, true) ~= nil))
+end)
+
+add("an answer one client missed is noticed and fetched, though a later answer arrived", function()
+    local a, c = newClient("Alpha"), newClient("Carol")
+    fill(a, "Alpha", 2, BASE, { target = "Zennit" })
+    local ids = {}
+    for id in pairs(a.db.events) do ids[#ids + 1] = id end
+    table.sort(ids)
+    a.db.events[ids[1]].response = { result = "refused", zroll = 0, sroll = 0, time = BASE + 20000 }
+    a.db.events[ids[2]].response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 30000 }
+    for id, ev in pairs(a.db.events) do c.db.events[id] = copyEvent(ev) end
+    c.db.events[ids[1]].response = nil -- the Z for the first was lost; the later one arrived
+    with(c, function() Sync.Hello() end)
+    settle({ a, c })
+    local r = c.db.events[ids[1]].response
+    return r ~= nil and r.result == "refused", "Carol's answer to the first: " .. tostring(r and r.result)
+end)
+
+add("a reply is accepted however long it waits behind other replies, and live news goes before it", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Alpha", 30, BASE)
+    with(b, function() Sync.OnMessage("1~H~" .. with(a, function() return Sync.Hello("WHISPER", "Beta") or a.state.queue[#a.state.queue].payload:match("^%d+~H~(.*)$") end), "WHISPER", "Alpha") end)
+    local req
+    for _, m in ipairs(b.state.queue) do if m.payload:match("^%d+~R~") then req = m.payload end end
+    if not req then return false, "no request" end
+    with(a, function()
+        a.state.queue = {}
+        Sync.OnMessage(req, "WHISPER", "Beta")
+        Store.Add({ caster = "Alpha", target = "Delta", assistants = {}, mapID = 1436, subzone = "", time = BASE + 999999,
+            confirmed = true }) -- a summons cast while the reply waits
+    end)
+    local sentFirst
+    with(a, function()
+        local saved = Sync.transport
+        Sync.transport = function(_, _, payload) sentFirst = sentFirst or payload end
+        Sync.Pump(1)
+        Sync.transport = saved
+    end)
+    clock = clock + 300 -- the reply leaves five minutes after the request (it waited behind others)
+    local added = 0
+    with(a, function() Sync.Pump(100000) end)
+    for _, m in ipairs(a.out) do
+        if m.payload:match("^%d+~B~") and m.target == "Beta" then
+            if with(b, function() return Sync.OnMessage(m.payload, "WHISPER", "Alpha") end) == "added" then added = added + 1 end
+        end
+    end
+    a.out = {}
+    return added == 30 and sentFirst and sentFirst:match("^%d+~E~") ~= nil,
+        string.format("added %d of 30 after 300 s; first out: %s", added, tostring(sentFirst and sentFirst:sub(1, 4)))
+end)
+
+add("a difference that cannot close is asked about once, not for ever", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    fill(a, "Gamma", 40, BASE)
+    for id, ev in pairs(a.db.events) do b.db.events[id] = copyEvent(ev) end
+    -- Gamma deleted one: the tombstone reached Alpha only, and Gamma is away, so Beta keeps it and Alpha refuses it
+    local gone = "Gamma-" .. (BASE + 3600)
+    a.db.events[gone] = nil
+    a.db.deleted = { [gone] = BASE }
+    with(a, function() Sync.Hello() end)
+    local first = settle({ a, b })
+    with(a, function() Sync.Hello() end)
+    with(b, function() Sync.Hello() end)
+    local again = settle({ a, b })
+    return (again.B or 0) == 0 and (again.R or 0) == 0 and (first.B or 0) <= 80,
+        string.format("first exchange B=%d R=%d; the same hellos again: B=%d R=%d", first.B or 0, first.R or 0, again.B or 0, again.R or 0)
+end)
+
+add("Zennit's own client counts the alt it plays, and a friend who missed it learns it at the next hello", function()
+    local a, b, z = newClient("Alpha"), newClient("Beta"), newClient("Zenalt")
+    local savedGet, savedZennit = ST.bnGetInfo, ST.ZENNIT_HASH
+    ST.ZENNIT_HASH = ST.TagHash("Zennit#1")
+    local out = {}
+    local ok, err = pcall(function()
+        ST.bnGetInfo = function() return 1, "Zennit#1" end
+        out.own = with(z, function() return ST.Week.IsZennit("Zenalt") end)
+        with(z, function() Sync.Hello() end)
+        ST.bnGetInfo = savedGet
+        settle({ z, a })                 -- Alpha hears him; Beta is away
+        out.alpha = with(a, function() return ST.Week.IsZennit("Zenalt") end)
+        out.betaBefore = with(b, function() return ST.Week.IsZennit("Zenalt") end)
+        with(b, function() Sync.Hello() end)
+        settle({ a, b })                 -- Beta's logs match Alpha's, but the fingerprints do not
+        out.beta = with(b, function() return ST.Week.IsZennit("Zenalt") end)
+        -- and an answer from his alt counts as his
+        fill(a, "Alpha", 1, BASE, { target = "Zennit" })
+        local id = next(a.db.events)
+        out.z = with(a, function() return Sync.OnMessage(string.format("1~Z~%s|accepted|0|0|%d", id, BASE + 99), "PARTY", "Zenalt") end)
+        out.stranger = with(a, function() return Sync.OnMessage(string.format("1~Z~%s|refused|0|0|%d", id, BASE + 199), "PARTY", "Beta") end)
+    end)
+    ST.bnGetInfo, ST.ZENNIT_HASH = savedGet, savedZennit
+    if not ok then return false, tostring(err) end
+    return out.own and out.alpha and not out.betaBefore and out.beta and out.z == "applied" and out.stranger == "rejected:sender",
+        string.format("own %s, Alpha %s, Beta %s then %s, answer from his alt %s, from a friend %s", tostring(out.own),
+            tostring(out.alpha), tostring(out.betaBefore), tostring(out.beta), tostring(out.z), tostring(out.stranger))
+end)
+
+add("two answers made in the same second: every client keeps the same one, whatever order they arrive in", function()
+    local x, y = newClient("Xena"), newClient("Yuri")
+    local id, ev = sample({ target = "Zennit" })
+    local acc, ref = copyEvent(ev), copyEvent(ev)
+    acc.response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 50 }
+    ref.response = { result = "refused", zroll = 0, sroll = 0, time = BASE + 50 }
+    with(x, function() Sync.Merge(id, copyEvent(acc), "Beta", false) Sync.Merge(id, copyEvent(ref), "Beta", false) end)
+    with(y, function() Sync.Merge(id, copyEvent(ref), "Beta", false) Sync.Merge(id, copyEvent(acc), "Beta", false) end)
+    local rx, ry = x.db.events[id].response.result, y.db.events[id].response.result
+    return rx == ry, rx .. " / " .. ry
+end)
+
+add("a subzone cut for the wire never splits a letter, and the caster keeps what friends receive", function()
+    local long = "Пещеры Стенаний и Подземелья" -- 53 bytes; byte 40 is the first half of a letter
+    local clipped = Sync.Clip(long, 40)
+    local whole = clipped:find("[\192-\255]$") == nil and #clipped <= 40 and long:sub(1, #clipped) == clipped
+    local a, b = newClient("Alpha"), newClient("Beta")
+    local id = cast(a, 1, false, { subzone = long })
+    settle({ a, b })
+    local mine, theirs = a.db.events[id].subzone, b.db.events[id] and b.db.events[id].subzone
+    return whole and mine == theirs and mine == clipped, string.format("%d bytes, whole letters %s, same on both %s", #clipped,
+        tostring(whole), tostring(mine == theirs))
+end)
+
+add("a client before 0.29 still reads our hello, and we still answer its hello and request the old way", function()
+    local a = newClient("Alpha")
+    fill(a, "Alpha", 3, BASE)
+    local body = with(a, function()
+        Sync.Hello("WHISPER", "Old")
+        return a.state.queue[#a.state.queue].payload:match("^%d+~H~(.*)$")
+    end)
+    -- the pattern a 0.28 client reads a hello with
+    local count, latest, respT, reset, mark, stamp = body:match("^(%d+)|(%d+)|[^|]*|?(%d*)|?(%d*)|?(%d*)|?(%x*)")
+    local oldReads = count == "3" and tonumber(latest) == BASE + 3 * 3600 and respT == "0" and reset == "0" and mark == "0" and stamp == ""
+    -- its hello (no fingerprint) gets an old request, which it can read
+    local b = newClient("Beta")
+    local r = with(b, function() return Sync.OnMessage("1~H~3|" .. (BASE + 3 * 3600) .. "|0.28.1|0|0|0", "PARTY", "Old") end)
+    local req
+    for _, m in ipairs(b.state.queue) do if m.payload:match("^%d+~R~") then req = m.payload end end
+    return oldReads and r:find("request", 1, true) ~= nil and req == "1~R~0",
+        string.format("0.28 reads %s/%s/%s/%s/%s/'%s'; old hello -> %s, request %s", tostring(count), tostring(latest), tostring(respT),
+            tostring(reset), tostring(mark), tostring(stamp), tostring(r), tostring(req))
+end)
+-- ===== [end tests:SYNC] =====
+
+
+-- ===== [tests:FILING] filing a summons exactly once (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+
+-- Runs fn(z) on a scratch client playing Zennit, with his client's seams in place, the new race rules, and the new filing rules
+-- (Respond.FILING_FROM) in force unless `from` says otherwise. Returns ok, err.
+local function asZennit(fn, from)
+    local z, R, S, G, W = newClient("Zennit"), ST.Respond, ST.Store, ST.Gag, ST.Week
+    local real = { me = S.me, is = G.IsZennit, later = R.later, print = ST.print, from = R.FILING_FROM, rules = W.RULES.from }
+    S.me = function() return "Zennit" end
+    G.IsZennit = function() return true end
+    R.later = function(f) f() end
+    ST.print = function() end
+    R.FILING_FROM = from or 0
+    W.RULES.from = 0
+    local ok, err = pcall(with, z, function() fn(z) end)
+    S.me, G.IsZennit, R.later, ST.print, R.FILING_FROM = real.me, real.is, real.later, real.print, real.from
+    W.RULES.from = real.rules
+    R.SetPrompt(nil, nil)
+    return ok, err
+end
+
+-- A summons of Zennit his client filed itself for `caster`, answered `result` (as FileWitnessed leaves it).
+local function filed(db, caster, t, result)
+    local id = "Zennit-" .. t
+    db.events[id] = { caster = caster, target = "Zennit", by = "Zennit", assistants = {}, mapID = 1436, subzone = "Sentinel Hill",
+        time = t, wrote = t, points = 3, kind = "zone", confirmed = false,
+        response = { result = result or "accepted", zroll = 0, sroll = 0, time = t + 5 } }
+    return id
+end
+
+-- The caster's own record of the same summons, as it comes over the wire.
+local function own(caster, t, over)
+    local ev = { caster = caster, target = "Zennit", assistants = {}, mapID = 1436, subzone = "Sentinel Hill", time = t, wrote = t,
+        confirmed = true }
+    for k, v in pairs(over or {}) do ev[k] = v end
+    return caster .. "-" .. t, ev
+end
+
+add("a caster's record that reaches his client by a batch, or that it already holds, takes over the summons it filed", function()
+    local out = {}
+    local ok, err = asZennit(function(z)
+        local now = time()
+        -- by a batch: added
+        local fid = filed(z.db, "Wally", now - 30)
+        local wid, wev = own("Wally", now - 10)
+        z.state.requested["Wally"] = clock
+        out.batch = Sync.OnMessage("1~B~" .. Sync.Encode(wid, wev), "WHISPER", "Wally")
+        out.batchGone = z.db.events[fid] == nil and Store.IsDeleted(fid)
+        out.batchMoved = z.db.events[wid] and z.db.events[wid].response and z.db.events[wid].response.result
+        -- already held (merged before his client filed its own, say by an older version): a live copy is kept, and still adopts
+        local vid, vev = own("Vic", now - 200)
+        z.db.events[vid] = select(2, own("Vic", now - 200))
+        local gid = filed(z.db, "Vic", now - 190, "declined")
+        out.kept = Sync.OnMessage("1~E~" .. Sync.Encode(vid, vev), "PARTY", "Vic")
+        out.keptGone = z.db.events[gid] == nil
+        out.keptMoved = z.db.events[vid].response and z.db.events[vid].response.result
+        local n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count = n
+    end)
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.batch == "added" and out.batchGone and out.batchMoved == "accepted"
+        and (out.kept == "kept" or out.kept == "replaced") and out.keptGone and out.keptMoved == "declined" and out.count == 2
+    return good, string.format("batch %s (filed gone %s, moved %s); held %s (filed gone %s, moved %s); %d records", tostring(out.batch),
+        tostring(out.batchGone), tostring(out.batchMoved), tostring(out.kept), tostring(out.keptGone), tostring(out.keptMoved), out.count or -1)
+end)
+
+add("by a batch, a caster's record leaves a closed week, or one before the new filing rules, as it was played", function()
+    local out = {}
+    local W, realClosed = ST.Week, ST.Week.EventClosed
+    local function batch(z, t)
+        local fid = filed(z.db, "Wally", t - 20)
+        local wid, wev = own("Wally", t)
+        z.state.requested["Wally"] = clock
+        local res = Sync.OnMessage("1~B~" .. Sync.Encode(wid, wev), "WHISPER", "Wally")
+        return res, z.db.events[fid] ~= nil and not z.db.events[wid].response
+    end
+    local ok, err = asZennit(function(z)
+        W.EventClosed = function(ev) return ev.time < time() - 1000 end
+        out.closedRes, out.closedLeft = batch(z, time() - 5000)
+        out.openRes, out.openLeft = batch(z, time() - 100)
+    end)
+    W.EventClosed = realClosed
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local ok2, err2 = asZennit(function(z)
+        out.oldRes, out.oldLeft = batch(z, time() - 100)
+        -- a live E is adopted as it always was, whatever the week
+        local fid = filed(z.db, "Cy", time() - 60)
+        local cid, cev = own("Cy", time() - 50)
+        Sync.OnMessage("1~E~" .. Sync.Encode(cid, cev), "PARTY", "Cy")
+        out.liveGone = z.db.events[fid] == nil
+    end, math.huge)
+    if not ok2 then return false, "ERROR " .. tostring(err2) end
+    local good = out.closedRes == "added" and out.closedLeft and out.openRes == "added" and out.openLeft == false
+        and out.oldRes == "added" and out.oldLeft and out.liveGone
+    return good, string.format("closed week left %s, open week left %s, before the rules left %s, live adopted %s",
+        tostring(out.closedLeft), tostring(out.openLeft), tostring(out.oldLeft), tostring(out.liveGone))
+end)
+
+add("after login his client adopts what it filed in the open weeks, nearest first, and leaves closed weeks and others' clients alone", function()
+    local out = {}
+    local W, realClosed = ST.Week, ST.Week.EventClosed
+    local ok, err = asZennit(function(z)
+        local now = time()
+        W.EventClosed = function(ev) return ev.time < now - 1000 end
+        -- an open week: two summons by Wally a minute apart, both filed by his client (the first declined, the second accepted)
+        local f1, f2 = filed(z.db, "Wally", now - 120, "declined"), filed(z.db, "Wally", now - 60, "accepted")
+        local w1, e1 = own("Wally", now - 115)
+        local w2, e2 = own("Wally", now - 58)
+        z.db.events[w1], z.db.events[w2] = e1, e2
+        -- a closed week: left as it was played
+        local f3 = filed(z.db, "Cy", now - 5000)
+        local w3, e3 = own("Cy", now - 4990)
+        z.db.events[w3] = e3
+        out.n = ST.Respond.AdoptAll()
+        out.r1 = e1.response and e1.response.result
+        out.r2 = e2.response and e2.response.result
+        out.gone = z.db.events[f1] == nil and z.db.events[f2] == nil
+        out.closed = z.db.events[f3] ~= nil and e3.response == nil
+        out.again = ST.Respond.AdoptAll()
+        ST.Gag.IsZennit = function() return false end
+        out.other = ST.Respond.AdoptAll()
+    end)
+    W.EventClosed = realClosed
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.n == 2 and out.r1 == "declined" and out.r2 == "accepted" and out.gone and out.closed and out.again == 0
+        and out.other == 0
+    return good, string.format("adopted %s (%s, %s), closed week kept %s, again %s, on another client %s", tostring(out.n),
+        tostring(out.r1), tostring(out.r2), tostring(out.closed), tostring(out.again), tostring(out.other))
+end)
+
+add("a decline his client filed, moved onto a caster's record with a writ, is decided again and costs him; not before the new rules", function()
+    return newRules(function()
+        local out = {}
+        local function run(writ, from)
+            local res = {}
+            local ok, err = asZennit(function(z)
+                local now = time()
+                filed(z.db, "Wally", now - 30, "declined")
+                local wid, wev = own("Wally", now - 20, { writ = writ, points = 3, kind = "zone" })
+                z.db.events[wid] = wev
+                res.adopted = ST.Respond.Adopt(wid, wev)
+                res.result = wev.response and wev.response.result
+                res.goal = Store.Goal(wev)
+            end, from)
+            if not ok then error(err, 0) end
+            return res
+        end
+        local okRun, err = pcall(function()
+            out.writ = run(true)
+            out.plain = run(nil)
+            out.old = run(true, math.huge)
+        end)
+        if not okRun then return false, "ERROR " .. tostring(err) end
+        local good = out.writ.adopted and out.writ.result == "refused" and out.writ.goal == -3
+            and out.plain.result == "declined" and out.plain.goal == 0 and out.old.result == "declined"
+        return good, string.format("writ: %s (%s); none: %s; before the rules: %s", tostring(out.writ.result), tostring(out.writ.goal),
+            tostring(out.plain.result), tostring(out.old.result))
+    end)
+end)
+
+add("a warlock casting again after he declined is filed again; the same prompt, or a form answer, files nothing", function()
+    local out = {}
+    local R = ST.Respond
+    local ok, err = asZennit(function(z)
+        local now = time()
+        R.SetPrompt(now - 70, nil)
+        out.first = R.Real("decline", "Wally", true)                     -- no record from Wally: his client files it, declined
+        out.same = R.Real("decline", "Wally", true)                      -- the same prompt again: nothing more
+        R.SetPrompt(now, nil)                                        -- Wally casts again; this time he accepts
+        out.second = R.Real("accept", "Wally", true)
+        local n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count = n
+        -- a summons he answered on the Index's form, then in the game's prompt: the form's answer stands for it
+        local vid, vev = own("Vic", now + 1)
+        vev.response = { result = "accepted", zroll = 0, sroll = 0, time = now + 2 }
+        z.db.events[vid] = vev
+        R.SetPrompt(now + 3, nil)
+        out.form = R.Real("accept", "Vic", true)
+        n = 0
+        for _ in pairs(z.db.events) do n = n + 1 end
+        out.count2 = n
+    end)
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = out.first and out.first.result == "declined" and out.same == nil and out.second and out.second.result == "accepted"
+        and out.count == 2 and out.form == nil and out.count2 == 3
+    return good, string.format("first %s, same prompt %s, again %s, %d records; form-answered %s, %d records",
+        tostring(out.first and out.first.result), tostring(out.same), tostring(out.second and out.second.result), out.count or -1,
+        tostring(out.form), out.count2 or -1)
+end)
+
+add("the assistants prompt ticks at most two, and no record ever saves more than two, a repeat, the caster or the target", function()
+    local P = ST.Prompt
+    local three, two = P.PreTicks({ "Cy", "Di", "Ed" }), P.PreTicks({ "Cy", "Di" })
+    local nThree = 0
+    for _ in pairs(three) do nThree = nThree + 1 end
+    local a = newClient("Wally")
+    local id, ev = with(a, function()
+        local i, e = Store.Add({ caster = "Wally", target = "Zennit", assistants = { "Cy", "Cy", "Wally", "Zennit", "Di", "Ed" },
+            mapID = 1436, subzone = "Sentinel Hill", time = BASE + 7, confirmed = true }, true)
+        return i, e
+    end)
+    local back = Sync.Decode(Sync.Encode(id, ev))
+    local good = nThree == 0 and two.Cy and two.Di and table.concat(ev.assistants, ",") == "Cy,Di" and back ~= nil
+    return good, string.format("three detected tick %d, two tick %s; saved %s; decodes %s", nThree,
+        tostring(two.Cy and two.Di), table.concat(ev.assistants, ","), tostring(back ~= nil))
+end)
+
+-- Plays a ritual through the detector and the witness with the game's unit calls stood in for: the caster's client (Wally) in a
+-- party with Cy and Di, targeting Zennit. Returns what was saved, what the prompt was asked, and any witness note sent.
+local function ritual(steps)
+    local D, P = ST.Detector, ST.Prompt
+    local got = { saved = {}, asked = nil, notes = {} }
+    local roster, channeling, target = { "Cy", "Di" }, {}, "Zennit"
+    local gt, tickers = 10, {}
+    local real = { UnitName = UnitName, UnitExists = UnitExists, UnitChannelInfo = UnitChannelInfo, IsInRaid = IsInRaid,
+        GetTime = GetTime, time = time, NewTicker = C_Timer.NewTicker, NewTimer = C_Timer.NewTimer, ask = P.Ask,
+        witness = Sync.SendWitness, print = ST.print, me = Store.me, lastCommit = D.lastCommit }
+    D.lastCommit = 0 -- our clock starts at 10: a commit made on the real one must not look like a second SUCCEEDED
+    local now = real.time()
+    rawset(_G, "UnitName", function(u)
+        if u == "player" then return "Wally" end
+        if u == "target" then return target end
+        if u == "party1target" or u == "party2target" then return "Zennit" end
+        local i = tonumber((u or ""):match("^party(%d)$"))
+        return i and roster[i] or nil
+    end)
+    rawset(_G, "UnitExists", function(u)
+        local i = tonumber((u or ""):match("^party(%d)$"))
+        return u == "player" or (i ~= nil and i <= #roster)
+    end)
+    rawset(_G, "UnitChannelInfo", function(u)
+        if channeling[u] then return "Ritual of Summoning", "", 0, 0, 0, false, false, ST.RITUAL_ID end
+    end)
+    rawset(_G, "IsInRaid", function() return false end)
+    rawset(_G, "GetTime", function() return gt end)
+    rawset(_G, "time", function(t) if t then return real.time(t) end return now end)
+    rawset(C_Timer, "NewTicker", function(_, fn)
+        local t = { fn = fn }
+        t.Cancel = function() t.dead = true end
+        tickers[#tickers + 1] = t
+        return t
+    end)
+    rawset(C_Timer, "NewTimer", function() return { Cancel = function() end } end)
+    P.Ask = function(tgt, candidates, pre, onDone) got.asked = { target = tgt, pre = pre, done = onDone } end
+    Sync.SendWitness = function(note) got.notes[#got.notes + 1] = note end
+    ST.print = function() end
+    Store.me = function() return "Wally" end
+    local a = newClient("Wally")
+    local ctl = {
+        channel = function(u, on) channeling[u] = on or nil end,
+        target = function(n) target = n end,
+        wait = function(s)
+            for _ = 1, s * 2 do
+                gt, now = gt + 0.5, now + 0.5
+                for _, t in ipairs(tickers) do if not t.dead then t.fn() end end
+            end
+        end,
+        sent = function() D.OnCast(nil, "UNIT_SPELLCAST_SENT", "player", "Zennit", "guid", ST.RITUAL_ID) end,
+        event = function(event, unit) D.OnCast(nil, event, unit or "player", "guid", ST.RITUAL_ID) end,
+        witness = function(event, unit) D.OnWitness(nil, event, unit) end,
+        now = function() return now end,
+    }
+    local ok, err = pcall(with, a, function() steps(ctl, got) end)
+    -- whatever happened, the player's own channel ends, so the witness is free again on a real client
+    channeling.player = nil
+    pcall(with, a, function() D.OnWitness(nil, "UNIT_SPELLCAST_CHANNEL_STOP", "player") end)
+    rawset(_G, "UnitName", real.UnitName)
+    rawset(_G, "UnitExists", real.UnitExists)
+    rawset(_G, "UnitChannelInfo", real.UnitChannelInfo)
+    rawset(_G, "IsInRaid", real.IsInRaid)
+    rawset(_G, "GetTime", real.GetTime)
+    rawset(_G, "time", real.time)
+    rawset(C_Timer, "NewTicker", real.NewTicker)
+    rawset(C_Timer, "NewTimer", real.NewTimer)
+    P.Ask = real.ask
+    Sync.SendWitness, ST.print, Store.me = real.witness, real.print, real.me
+    D.lastCommit = real.lastCommit
+    if not ok then error(err, 0) end
+    for _, ev in pairs(a.db.events) do got.saved[#got.saved + 1] = ev end
+    return got
+end
+
+add("a ritual still channelling after 30 s keeps the target it was cast on and its helpers, and is filed at the time it was cast", function()
+    local out = {}
+    local got = ritual(function(c, g)
+        c.sent()
+        c.event("UNIT_SPELLCAST_CHANNEL_START")
+        c.channel("player", true)
+        c.channel("party1", true)
+        c.channel("party2", true)
+        c.target("Cy")                                              -- the caster clicks a helper while waiting for clickers
+        c.wait(31)
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        out.auto = g.saved and true
+        -- a second ritual with one helper: the prompt saves it 20 s later, at the ritual's time
+        c.channel("party2", false)
+        c.target("Zennit")
+        c.wait(10)
+        c.sent()
+        c.event("UNIT_SPELLCAST_CHANNEL_START")
+        c.wait(2)
+        out.castAt = c.now()
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        c.wait(20)
+        if g.asked then g.asked.done({ "Cy" }, false) end
+    end)
+    table.sort(got.saved, function(x, y) return x.time < y.time end)
+    local first, second = got.saved[1], got.saved[2]
+    local good = #got.saved == 2 and first.target == "Zennit" and table.concat(first.assistants, ",") == "Cy,Di" and first.confirmed
+        and second.target == "Zennit" and second.time == out.castAt and table.concat(second.assistants, ",") == "Cy"
+    return good, string.format("%d saved; first on %s with %s; second at %s (cast %s)", #got.saved, tostring(first and first.target),
+        first and table.concat(first.assistants, ",") or "-", tostring(second and second.time), tostring(out.castAt))
+end)
+
+add("the target or the caster seen channelling is never credited as an assistant: two helpers with the target among them ask", function()
+    local got = ritual(function()
+        ST.Detector.Finish({ target = "Zennit", mapID = 1436, subzone = "Sentinel Hill", helpers = { "Cy", "Zennit" } })
+    end)
+    local pre = got.asked and table.concat(got.asked.pre, ",")
+    local good = #got.saved == 0 and pre == "Cy"
+    return good, string.format("%d saved without asking; prompt ticks %s", #got.saved, tostring(pre))
+end)
+
+add("the caster's own client never sends a witness note naming one of its helpers as the caster; a bystander's still does", function()
+    local out = {}
+    local got = ritual(function(c, g)
+        -- Wally's own ritual, committed as the channel begins; Cy then clicks the portal and stops
+        c.sent()
+        c.event("UNIT_SPELLCAST_SUCCEEDED")
+        c.channel("player", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "player")
+        c.wait(10)
+        c.channel("party1", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party1")
+        c.channel("party1", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "party1")
+        c.channel("player", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+        out.own = #g.notes
+        if g.asked then g.asked.done({}, false) end
+        -- later Wally only watches: Cy casts (on Wally's target stand-in), Di clicks, Cy stops
+        c.wait(60)
+        c.channel("party1", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party1")
+        c.channel("party2", true)
+        c.witness("UNIT_SPELLCAST_CHANNEL_START", "party2")
+        c.channel("party1", false)
+        c.witness("UNIT_SPELLCAST_CHANNEL_STOP", "party1")
+    end)
+    local note = got.notes[1]
+    local good = out.own == 0 and #got.notes == 1 and note.caster == "Cy" and table.concat(note.helpers, ",") == "Di"
+    return good, string.format("notes during his own ritual %s; as a bystander %d (caster %s)", tostring(out.own), #got.notes,
+        tostring(note and note.caster))
+end)
+
+-- ===== [end tests:FILING] =====
+
+
+-- ===== [tests:RACE] the weekly race rules (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+add("closing the Index: not while the latest summons filed waits for his answer, which counts as accepted (B2)", function()
+    return newRules(function()
+        local W, z = ST.Week, newClient("Zennit")
+        local out = {}
+        with(z, function()
+            local start = W.Start(BASE + 990)
+            for n = 1, 6 do
+                z.db.events["Alpha-" .. n] = { caster = "Alpha", target = "Zennit", assistants = {}, time = start + n, points = 3,
+                    kind = "zone" }
+            end
+            for n = 1, 5 do
+                z.db.events["Alpha-" .. n].response = { result = "accepted", zroll = 0, sroll = 0, time = start + 10 + n }
+            end
+            -- five answered and the sixth, the latest, still waiting: no close, and the sixth still counts
+            out.target = W.CloseTarget(start)
+            out.closed = ST.Respond.CloseIndex(start)
+            out.score = W.Score(start)
+            out.sixth = W.Counts(z.db.events["Alpha-6"])
+            -- once he answers it, he can close on it, and nothing filed before the close is lost
+            z.db.events["Alpha-6"].response = { result = "accepted", zroll = 0, sroll = 0, time = start + 20 }
+            out.after = W.CloseTarget(start)
+            out.closedAfter = ST.Respond.CloseIndex(start)
+            out.final = W.Score(start)
+        end)
+        local r, f = out.score, out.final
+        local ok = out.target == nil and out.closed == false and r.counted == 6 and r.group == 18 and out.sixth
+            and out.after == "Alpha-6" and out.closedAfter and f.closed and f.counted == 6 and f.extra == 0 and f.group == 18
+        return ok, string.format("target %s, closed %s, counted %d (group %d), sixth counts %s; then target %s, closed %s, counted %d",
+            tostring(out.target), tostring(out.closed), r.counted, r.group, tostring(out.sixth), tostring(out.after),
+            tostring(out.closedAfter), f.counted)
+    end)
+end)
+
+add("from 9 November 2026 a week with no summons of Zennit has no winner, however much friends summon each other (B3)", function()
+    return newRules(function()
+        local W, a = ST.Week, newClient("Alpha")
+        local saved = W.RULES.needsHim
+        local out = {}
+        local ok, err = pcall(with, a, function()
+            local this = W.Start()
+            local w1, w2 = this - 2 * 7 * 86400, this - 7 * 86400
+            -- two weeks ago: one summons of him, unanswered, 3 to his 2: the group's week
+            a.db.events["Alpha-1"] = { caster = "Alpha", target = "Zennit", assistants = {}, time = w1 + 3600, points = 3, kind = "zone" }
+            -- last week: nobody summoned him; Alpha summoned Bravo
+            a.db.events["Alpha-2"] = { caster = "Alpha", target = "Bravo", assistants = {}, time = w2 + 3600, points = 3, kind = "zone" }
+            local function look()
+                local r, s = W.Score(w2), W.Season()
+                return { winner = r.winner, off = W.IsOff(this), immune = (W.Immune(time())), zennit = s.zennit, group = s.group,
+                    said = W.Describe(r) }
+            end
+            W.RULES.needsHim = 0
+            out.new = look()
+            -- a week played before the rule keeps its result: his head start won it, and this week is his week off
+            W.RULES.needsHim = math.huge
+            out.old = look()
+        end)
+        W.RULES.needsHim = saved
+        if not ok then return false, "ERROR " .. tostring(err) end
+        local n, o = out.new, out.old
+        local good = n.winner == nil and not n.off and not n.immune and n.zennit == 0 and n.group == 1
+            and n.said:find("no winner", 1, true) and not n.said:find("won the week", 1, true)
+            and o.winner == "zennit" and o.off and o.immune and o.zennit == 1 and o.group == 1
+            and W.RaceNeedsHim(W.RULES.needsHim) and not W.RaceNeedsHim(W.RULES.needsHim - 7 * 86400)
+            and W.Start(W.RULES.needsHim) == W.RULES.needsHim
+        return good, string.format("from the rule: winner %s, off %s, season %d-%d, '%s'; before it: winner %s, off %s, season %d-%d",
+            tostring(n.winner), tostring(n.off), n.zennit, n.group, n.said, tostring(o.winner), tostring(o.off), o.zennit, o.group)
+    end)
+end)
+
+add("Week.Immune agrees with Week.IsOff: a season started or stopped this week is not his week off (B4)", function()
+    return newRules(function()
+        local W = ST.Week
+        local out = {}
+        local function client(mark)
+            local c = newClient("Alpha")
+            with(c, function()
+                local this = W.Start()
+                -- he won last week on the dice
+                c.db.events["Alpha-1"] = { caster = "Alpha", target = "Zennit", assistants = {}, time = this - 7 * 86400 + 3600,
+                    points = 3, kind = "zone", response = { result = "won", zroll = 90, sroll = 10, time = this - 7 * 86400 + 3700 } }
+                if mark then W.PutMark(mark, this + 600) end
+            end)
+            return c
+        end
+        local function look(c)
+            return with(c, function()
+                return { immune = (W.Immune(time())), off = W.IsOff(W.Start()), briefing = W.Briefing("Zennit", nil, nil) or "" }
+            end)
+        end
+        out.plain, out.started, out.stopped = look(client()), look(client("start")), look(client("stop"))
+        -- the old rules keep their warning: there a week off was only a word, and no mark changed it
+        local old = client("start")
+        W.RULES.from = math.huge
+        local ok, immune = pcall(with, old, function() return (W.Immune(time())) end)
+        W.RULES.from = 0
+        if not ok then return false, "ERROR " .. tostring(immune) end
+        out.old = immune
+        local p, s, t = out.plain, out.started, out.stopped
+        local good = p.immune and p.off and p.briefing:find("week off", 1, true)
+            and not s.immune and not s.off and not s.briefing:find("week off", 1, true)
+            and not t.immune and not t.off and not t.briefing:find("week off", 1, true)
+            and out.old == true
+        return good, string.format("no mark %s/%s, started %s/%s '%s', stopped %s/%s, old rules %s", tostring(p.immune), tostring(p.off),
+            tostring(s.immune), tostring(s.off), s.briefing, tostring(t.immune), tostring(t.off), tostring(out.old))
+    end)
+end)
+-- ===== [end tests:RACE] =====
+
+
+-- ===== [tests:LOG] undo, cards, resets and tallies (0.29.0 review fixes) =====
+-- (new tests for this area go directly below this line)
+add("undo removes the newest summons this client wrote: a record Zennit's client filed for a caster is his to undo, not the caster's", function()
+    local z, b, c = newClient("Zennit"), newClient("Bravo"), newClient("Charlie")
+    for _, x in ipairs({ z, b, c }) do x.db.settings.zenitNames = { "Zennit" } end
+    local own = cast(b, 960, false, { target = "Charlie" })
+    -- Bravo cast this one without the addon running, so Zennit's client filed it (Respond.Witnessed: by = target = Zennit)
+    local filed = cast(z, 961, false, { caster = "Bravo", target = "Zennit", by = "Zennit", confirmed = false })
+    settle({ z, b, c })
+    local function count(x)
+        local n = 0
+        for _ in pairs(x.db.events) do n = n + 1 end
+        return n
+    end
+    local before = count(z) .. count(b) .. count(c)
+    local his = with(b, function() return Store.RemoveLast() end)
+    settle({ z, b, c })
+    local afterBravo = count(z) .. count(b) .. count(c)
+    local zennits = with(z, function() return Store.RemoveLast() end)
+    settle({ z, b, c })
+    local afterZennit = count(z) .. count(b) .. count(c)
+    local good = before == "222" and his and his.id == own and afterBravo == "111" and zennits and zennits.id == filed
+        and afterZennit == "000" and z.db.deleted and z.db.deleted[filed] ~= nil and b.db.deleted[filed] ~= nil
+    return good, string.format("before %s; Bravo's undo took %s (%s); Zennit's took %s (%s)", before, tostring(his and his.id),
+        afterBravo, tostring(zennits and zennits.id), afterZennit)
+end)
+
+add("a card sold to a name typed in lower case is the holder's: matched by name whatever the case, old cards included", function()
+    local C, out = ST.Cards, {}
+    local z, a = newClient("Zennit"), newClient("Alpha")
+    z.db.settings.zenitNames, a.db.settings.zenitNames = { "Zennit" }, { "Zennit" }
+    with(z, function()
+        out.card = C.Issue("bravo", 2, 100)
+        out.left = C.Left("Bravo")
+    end)
+    with(a, function()
+        -- a card an earlier version saved as typed, with one punch already used by Bravo's summons of Zennit
+        a.db.cards = { ["card-1"] = { id = "card-1", holder = "bravo", punches = 3, silver = 90, time = BASE } }
+        a.db.events["Bravo-1"] = { caster = "Bravo", target = "Zennit", assistants = {}, time = BASE + 10, points = 3, kind = "zone",
+            response = { result = "paid", zroll = 0, sroll = 0, time = BASE + 20, card = true } }
+        out.oldLeft, out.price, out.lines = C.Left("Bravo"), C.UnitPrice("Bravo"), table.concat(C.Lines("Bravo"), " ")
+        -- a card that arrives with a holder in lower case is kept the game's way
+        out.k = Sync.OnMessage("1~K~card-2|carol|4|100|" .. BASE, "PARTY", "Zennit")
+        out.carol = a.db.cards["card-2"] and a.db.cards["card-2"].holder
+        out.carolLeft = C.Left("Carol")
+    end)
+    local good = out.card and out.card.holder == "Bravo" and out.left == 2 and out.oldLeft == 2 and out.price == 30
+        and out.lines == "Bravo: 2 of 3 punches left, 1 already stamped." and out.k == "card" and out.carol == "Carol"
+        and out.carolLeft == 4
+    return good, string.format("sold to %s, %s left; old card %s left at %s each (%s); K holder %s, %s left",
+        tostring(out.card and out.card.holder), tostring(out.left), tostring(out.oldLeft), tostring(out.price), tostring(out.lines),
+        tostring(out.carol), tostring(out.carolLeft))
+end)
+
+add("used-up cards are sent again: a holder's every card goes with Zennit's hello, and every card to a client that asks", function()
+    local C = ST.Cards
+    local z, c, d = newClient("Zennit"), newClient("Charlie"), newClient("Dee")
+    local function punched(caster, i)
+        return { caster = caster, target = "Zennit", assistants = {}, time = BASE + 100 + i, points = 3, kind = "zone",
+            response = { result = "paid", zroll = 0, sroll = 0, time = BASE + 200, card = true } }
+    end
+    for _, x in ipairs({ z, c, d }) do
+        x.db.settings.zenitNames = { "Zennit" }
+        x.db.events = { ["Bravo-1"] = punched("Bravo", 1), ["Bravo-2"] = punched("Bravo", 2), ["Dora-3"] = punched("Dora", 3) }
+    end
+    -- Charlie and Dee were offline when these were sold
+    z.db.cards = {
+        ["card-1"] = { id = "card-1", holder = "Bravo", punches = 2, silver = 80, time = BASE + 1 },   -- used up
+        ["card-2"] = { id = "card-2", holder = "Bravo", punches = 5, silver = 200, time = BASE + 2 },
+        ["card-3"] = { id = "card-3", holder = "Dora", punches = 1, silver = 40, time = BASE + 3 },    -- used up, her only one
+    }
+    local function sent(x)
+        local n = 0
+        for _, m in ipairs(x.state.queue) do
+            if m.payload:match("^%d+~K~") then n = n + 1 end
+        end
+        return n
+    end
+    local hello = with(z, function()
+        Sync.SendCards()
+        return sent(z)
+    end)
+    settle({ z, c })
+    local asked = with(z, function()
+        Sync.SendCards("Dee")
+        return sent(z)
+    end)
+    settle({ z, d })
+    local cLeft, cUsed = with(c, function() return C.Left("Bravo"), C.Exhausted("Bravo") end)
+    local dCards = 0
+    for _ in pairs(d.db.cards or {}) do dCards = dCards + 1 end
+    local good = hello == 2 and cLeft == 5 and cUsed == 1 and asked == 3 and dCards == 3
+    return good, string.format("hello sent %d, Charlie: Bravo has %s left, %s used up; a request got %d, Dee holds %d",
+        hello, tostring(cLeft), tostring(cUsed), asked, dCards)
+end)
+
+add("tallies count only summons that land: cast, received and assisted, and his points still count the dice he won", function()
+    local a = newClient("Alpha")
+    cast(a, 965, true, { target = "Zennit", response = { result = "away", zroll = 0, sroll = 0, time = BASE + 5 } })
+    cast(a, 966, true, { target = "Zennit", response = { result = "declined", zroll = 0, sroll = 0, time = BASE + 5 } })
+    cast(a, 967, true, { target = "Zennit", response = { result = "won", zroll = 80, sroll = 20, time = BASE + 5 } })
+    cast(a, 968, true, { target = "Zennit", response = { result = "accepted", zroll = 0, sroll = 0, time = BASE + 5 } })
+    local t = with(a, function() return ST.Store.Tallies() end)
+    local good = t.Alpha.cast == 1 and t.Alpha.points == 3 and t.Zennit.received == 1 and t.Zennit.points == 3
+        and t.H1.assisted == 1 and t.H2.assisted == 1
+    return good, string.format("Alpha cast %d (%d pts), Zennit received %d (%d pts), H1 assisted %d", t.Alpha.cast, t.Alpha.points,
+        t.Zennit.received, t.Zennit.points, t.H1.assisted)
+end)
+
+add("badges are kept per character: an alt has none of its main's, and a character's old badges are kept without a word", function()
+    local a = newClient("Alpha")
+    local first, alt, again
+    with(a, function()
+        ST.Scoring.Badges() -- what logging in does (initDB)
+        first = select(3, Store.Add({ caster = "Alpha", target = "Bo", assistants = {}, time = BASE + 970, confirmed = true }, true))
+    end)
+    local altClient = { name = "Alphalt", out = {}, state = Sync.newState(), db = a.db } -- the same account's saved variables
+    with(altClient, function() alt = ST.Scoring.Badges() end)
+    -- a character with badges saved account-wide by an earlier version, and no entry of its own yet
+    local m = newClient("Mia")
+    m.db.badges = { ["first-summon"] = { earned = BASE } }
+    m.db.events["Mia-" .. (BASE + 971)] = { caster = "Mia", target = "Bo", assistants = {}, time = BASE + 971, confirmed = true }
+    local kept, announced = with(m, function() return ST.Scoring.Badges()["first-summon"], ST.Scoring.EvaluateBadges() end)
+    -- a reset clears them, and the next summons announces its badge again
+    with(a, function()
+        ST.Reset.Apply(BASE + 980)
+        again = select(3, Store.Add({ caster = "Alpha", target = "Bo", assistants = {}, time = BASE + 990, confirmed = true }, true))
+    end)
+    local good = first[1] == "Entered in the Index" and a.db.badgesBy.Alpha ~= nil and next(alt) == nil and kept ~= nil
+        and #announced == 0 and again[1] == "Entered in the Index"
+    return good, string.format("first summons: %s; the alt holds %s; old badge kept %s, announced %d; after a reset: %s",
+        tostring(first[1]), tostring(next(alt)), tostring(kept ~= nil), #announced, tostring(again and again[1]))
+end)
+
+add("a reset keeps the tombstones of summons made after its mark, so a deleted summons stays deleted", function()
+    local a = newClient("Alpha")
+    local early, late, late2 = "Alpha-" .. (BASE + 10), "Beta-" .. (BASE + 100), "Beta-" .. (BASE + 100) .. "-2"
+    a.db.deleted = { [early] = 1, [late] = 2, [late2] = 3 }
+    local back = with(a, function()
+        ST.Reset.Apply(BASE + 50)
+        local _, ev = Sync.Decode(Sync.Encode(late, { caster = "Beta", target = "Tgt", assistants = {}, time = BASE + 100,
+            wrote = BASE + 100, confirmed = true }))
+        return Sync.Merge(late, ev, "Gamma", false)
+    end)
+    local d = a.db.deleted or {}
+    local good = d[early] == nil and d[late] ~= nil and d[late2] ~= nil and back == "rejected:deleted"
+    return good, string.format("older dropped %s, later kept %s and %s; the deleted summons offered again: %s",
+        tostring(d[early] == nil), tostring(d[late] ~= nil), tostring(d[late2] ~= nil), tostring(back))
+end)
+
+add("a summons is never filed at or before the reset mark: a clock behind the admin's files it just after, and peers take it", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    a.db.resetAt, b.db.resetAt = BASE + 500, BASE + 500
+    local behind = cast(a, 400, false) -- the caster's clock says before the mark
+    local ahead = cast(a, 600, false)  -- and an ordinary one after it is left alone
+    settle({ a, b })
+    local ev = a.db.events[behind]
+    local good = behind == "Alpha-" .. (BASE + 501) and ev and ev.time == BASE + 501 and ev.wrote > BASE + 500
+        and b.db.events[behind] ~= nil and ahead == "Alpha-" .. (BASE + 600) and b.db.events[ahead] ~= nil
+    return good, string.format("filed as %s, Beta holds it %s; the later one %s", tostring(behind),
+        tostring(b.db.events[behind] ~= nil), tostring(ahead))
+end)
+
+add("a tombstone a peer sends is stamped with the wall clock, as the caster's own is", function()
+    local a, b = newClient("Alpha"), newClient("Beta")
+    local id = cast(a, 975, false)
+    settle({ a, b })
+    with(a, function() Store.Remove(id) end)
+    settle({ a, b })
+    local mine, theirs = a.db.deleted and a.db.deleted[id], b.db.deleted and b.db.deleted[id]
+    local good = b.db.events[id] == nil and mine and theirs and math.abs(theirs - time()) <= 5 and math.abs(mine - time()) <= 5
+    return good, string.format("caster's %s, peer's %s, now %d", tostring(mine), tostring(theirs), time())
+end)
+-- ===== [end tests:LOG] =====
+
 
 function T.Run(quiet)
     realEventClosed, realLateAnswer = ST.Week.EventClosed, ST.Week.LateAnswer

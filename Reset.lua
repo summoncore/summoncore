@@ -31,7 +31,15 @@ function Reset.Apply(stamp)
     end
     ST.db.resetAt = stamp
     ST.db.badges = {}
-    ST.db.deleted = nil -- tombstones older than the reset are redundant
+    -- badges go too (Scoring.Badges): this character starts again with none, and any other is worked out afresh at its login
+    ST.db.badgesBy = { [ST.Sync.myName()] = {} }
+    -- A tombstone of a summons the reset removes is redundant (the mark refuses it), but one of a summons made after the mark is
+    -- not: this reset may be accepted long after its stamp, and a peer may still hold that summons. The id carries the summons'
+    -- time ("<author>-<time>[-n]").
+    for id in pairs(ST.db.deleted or {}) do
+        local t = tonumber(id:match("^[^%-]+%-(%d+)"))
+        if not t or t <= stamp then ST.db.deleted[id] = nil end
+    end
     ST.db.cards = nil   -- a card's punches are counted from the summons, so with them gone every card would be full again
     if ST.db.settings then ST.db.settings.weekSeen, ST.db.settings.weekAnnounced = nil, nil end
     if ST.Hub then ST.Hub.Refresh() end

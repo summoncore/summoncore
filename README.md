@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.32.0, work in progress**. See [Status](#status) for what has and has
+Status: **v0.30.0, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -50,8 +50,11 @@ credited from the caster's snapshot either way. **When the caster does not have 
 answers the game's prompt and no record of it has arrived within a few seconds: the caster from the prompt (or the only warlock in his
 group), the place from where he arrives (or, if he declines, from a helper's client), and the helpers only if someone in the group
 runs the addon. Every client in the group that is not casting watches who channels a ritual and sends Zennit's client a note (`W`);
-a helper's own client also gives the place. If the caster's own record turns up later, it replaces the filed one and his answer
-moves to it. Nothing is filed if he never answers the prompt, and no writ can be played without the caster's addon. On the first login the addon says a
+a helper's own client also gives the place (the caster's own client never sends one). If the caster's own record turns up later,
+it replaces the filed one and his answer moves to it. From the week of 9 November 2026 that happens whether the record comes live
+or in a batch (his client also looks for such pairs a little after login), and a decline moved over is decided again, so a decline
+of a summons with a writ costs him; earlier weeks, and any closed week, keep what they were played with. A warlock who casts again
+after he declined is filed again. Nothing is filed if he never answers the prompt, and no writ can be played without the caster's addon. On the first login the addon says a
 three-line welcome to this effect (`/sc welcome` says it again).
 
 ## Commands
@@ -65,15 +68,15 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc feelings [on\|off]` | **The weekly question**: once a week, at the first login after a week with summons, the Index asks "How was last week?" with three buttons (Good fun / It was fine / Not for me); Zennit is asked "How was being summoned?" (Bring it on / Fine / Too much). Close it to skip; `off` stops it. Answers go only to Zennit's and the admin's clients (each client re-sends its own with its hello, so they catch up), where `/sc feelings` (and Tools > General > How it felt, for the admin) shows **counts per week, never names** |
 | `/sc panel` | Open the window on the Party tab |
 | `/sc log [n]` | Recent summons |
-| `/sc tally` | Cast, received and assisted counts and points per player, ranked by summons of Zennit this season (what the race counts), then points. The Party tab's Tally is the same list, with an "Of Zennit" column |
-| `/sc badges` | Badge list |
+| `/sc tally` | Cast, received and assisted counts and points per player, ranked by summons of him this season, then points. The Party tab's Tally is the same list, with an "Of Zennit" column |
+| `/sc badges` | Badge list (badges are kept per character: an alt earns its own) |
 | `/sc writ` | Arm a writ for your next ritual on Zennit (two a week): if he declines that summons in the game, it costs him its points. Again to withdraw it. It is also a **key binding** (Esc > Options > Key Bindings > AddOns > Summon Core: "Play a writ on your next summons of Zennit"), so it is one key in the middle of play; the binding (`Bindings.xml`) has never been tried in the client |
 | `/sc week copy` | Opens the same "Week:" line `/sc week say` would send, in the copy window, to paste where you choose (nothing is sent). It says why not under the old rules |
 | `/sc week say` | Tell the group (party or raid chat) where the week stands, in one line: the lead, his dice left, the last call. It uses `C_ChatInfo.SendChatMessage` (the global `SendChatMessage` is only a deprecation fallback on this client, kept as a last resort), which has never been tried under the 12.0 chat rules |
 | `/sc check` | Admin only. The live-client checklist (`design/verification.md`), also the Tools tab's Checks section (RUN AUTO, NEXT, PASS, FAIL, SKIP, TRACE, REPORT, COPY: the output box cannot be selected, so COPY opens its text in a window that can): `/sc check auto` runs the automatic checks, `/sc check <id>` gives the steps for the rest, `pass`/`fail`/`skip <id> [note]` records a result, `trace` shows what the summon prompt did, `report` opens a copyable report to send back. Some checks turn green on their own when they happen for real |
 | `/sc where` | Current map ID, subzone and how it scores |
 | `/sc places` | What a place is worth (a city 1, a zone 3, a dungeon entrance 5, a far-flung place 10) and every map ID in the table, checked against the game's own name for it; a wrong or missing one is flagged. The ritual briefing on Zennit also says what the place you stand in is worth |
-| `/sc undo` | Remove the newest summon you cast (earned badges are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
+| `/sc undo` | Remove the newest summon your client logged: usually the newest you cast, and on Zennit's client also one his client filed for a caster without the addon (earned badges are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
 | `/sc admin` | Admin only. What the game reports as this account's BattleTag, and whether it is the admin's or Zennit's |
 | `/sc reset [all]` | Wipe this client's summons, badges and story (it asks first). `all` is admin only: it asks everyone else to do the same |
 | `/sc season [start\|stop]` | Whether a season is running. `start` and `stop` are admin only (each asks first): `stop` ends the season in progress now, with no finale; `start` begins a new one, 0 to 0, from this week. Everyone's client hears of it, now or at its next hello. Also Tools > General > **The season** |
@@ -90,7 +93,7 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc titles` | Who leads each of the season's titles so far, with who is close behind: the heaviest hand, the best supporting role (assists), the lucky pair (whose bonus tipped most rolls), the prompt payer, the process server (whose writs cost him the most points), and Zennit's kind ones (the dice goblin, the hard bargain, the quick reply, and the good sport: ten summons or more that he went on in the season). The Index names them for good in the finale's keepsake. Praise in words, no points. Also the Tools tab's **The titles** |
 | `/sc tab` | The silver tab as a statement: on Zennit's client, who owes him what across every week and what has been paid; on anyone else's, what you owe him and your card's punches. Also the Tools tab's **The tab** |
 | `/sc leaders` (also `/sc leaderboard`) | **The leaderboard**, the top ten of three boards: who has summoned Zennit most (this season, which is what the race counts, then this week and in all), who has given him the most fish (this week and in all, from the totals his client shares), and who has thrown the most snowballs at him. The Party tab's **Leaders** section shows all three in full, side by side; the Tools tab's **Leaderboard** prints them, which is how Zennit (who cannot open the Party tab) sees them. Rankings give no gag away, so his client shows them too |
-| `/sc snowballs` | **Who has thrown snowballs at Zennit**, and how many (this week and in all). Only the thrower's client sees its own cast for certain, so the thrower's client counts each Snowball that lands on him (a cast at him that succeeds; one at anyone else, or one that fails, does not count) and tells everyone its totals (message `N`); his client says who hit him ("Bo threw a snowball at you!"). A throw from someone without the addon is not seen. The leaderboard's third board |
+| `/sc snowballs` | **Who has thrown snowballs at Zennit**, and how many (this week and in all). Only the thrower's client sees its own cast for certain, so the thrower's client counts each Snowball that lands on him (a cast at him that succeeds; one at anyone else, or one that fails, does not count) and tells everyone its totals (message `O`); his client says who hit him ("Bo threw a snowball at you!"). A throw from someone without the addon is not seen. The leaderboard's third board |
 | `/sc fish` | **The fish book**: on Zennit's client, who has given him fish and how many (this week and in all), by giver and by kind. Fish **traded** to him (counted when the trade completes) or **mailed** to him (counted as he takes them from the mail) go in by themselves. **Wrapped fish** too: what is in a present cannot be seen until it is opened, so a present (an item named "Wrapped ...", "... Present" or "... Gift", never the paper) that arrives from a player by trade or mail is noted with its sender; when he opens a present in his bags, the fish there are counted just before, and the fish that turn up within a minute are the sender's (the oldest noted present of that name is the one opened). A present the addon did not see arrive is said, not counted (`/sc fish add` puts it in); a mail no player sent (the Auction House) and, when the game does not say, one from a stranger are left out, as for silver. A fish is known by its item ID (the old world's raw and cooked fish) or a fish word in its name (cod, salmon, eel, anything ending in "fish"...), never a rod, bait or recipe. His client also has `/sc fish add <name> <count> [what]` to write one in by hand and `/sc fish undo` to take the newest out. The book stays on his client, but each giver's totals are shared with everyone (message `P`, only from his characters), so anyone's `/sc fish` lists the givers. Also the Tools tab's **Fish** |
 | `/sc cards` | Who holds a summon card and how many punches are left. `/sc card` explains cards; Zennit's own: `/sc card sell <name> [punches [silver]]` and `/sc card offer <punches> <silver>`. Also the Tools tab's **Summon cards** |
 | `/sc probe` | Listens to trade and mail events and prints what the client lets an addon see (who, how much, or a secret value), to learn how the fifty silver could be detected. Run it again to stop |
@@ -163,8 +166,11 @@ License, `Media/fonts/VT323-OFL.txt`); if the game cannot load it, the standard 
 
 Exactly two group members seen channeling the ritual are credited automatically, in a party or anywhere in a
 raid. With any other count, the prompt opens with the detected helpers ticked (listed first; in a raid the list
-stops at 12). It saves itself as ticked after 20 seconds, so you only need to touch it to correct the names;
-changing a tick stops the countdown. Solo or in a two-person party it saves without asking.
+stops at 12), unless more than two were seen (another ritual nearby, say): then none is ticked and you tick the two
+who helped. It saves itself as ticked after 20 seconds, so you only need to touch it to correct the names;
+changing a tick stops the countdown. Solo or in a two-person party it saves without asking. The summons keeps the time the
+ritual was cast, however long the prompt stays open. The one summoned and the caster are never credited as assistants, and
+no summons is ever saved with more than two.
 
 ### Scoring
 
@@ -180,33 +186,45 @@ Placeholder values, meant to be argued about. Edit the tables at the top of `Sco
 A dungeon entrance sits inside an ordinary outdoor map, so it is matched by subzone. Stand at the spot and
 run `/sc where` to read the exact string. Points go to the caster only.
 
-Badges, named as the Index would (the Badges tab says what each takes): Entered in the Index (a first summons), Filed in Triplicate (ten), A Volume of Their Own (fifty), Admitted Below Stairs (a dungeon entrance), Beyond the Index's Jurisdiction (a far-flung place), Stamped in Five Places (five different maps), and four that come later and come from the log: Known to the Clerk (summoned him in four different weeks), Countersigned by Witnesses (helpers tipped a roll of yours), Paid in Full, No Receipt (your tab is clear) and Stamped to the Last Punch (used up a card). They are for the people who cast; helpers get titles, not badges.
+Badges, named as the Index would (the Badges tab says what each takes): Entered in the Index (a first summons), Filed in Triplicate (ten), A Volume of Their Own (fifty), Admitted Below Stairs (a dungeon entrance), Beyond the Index's Jurisdiction (a far-flung place), Stamped in Five Places (five different maps), and four that come later and come from the log: Known to the Clerk (summoned him in four different weeks), Countersigned by Witnesses (helpers tipped a roll of yours), Paid in Full, No Receipt (your tab is clear) and Stamped to the Last Punch (used up a card). They are for the people who cast; helpers get titles, not badges. Each character earns and keeps its own.
 
 ### Sync
 
 Sync shares events, not totals, so merging is a set union and nothing is double-counted. Messages use the
 `SUMMONSYNC` prefix: `H` (hello), `E` (new event, broadcast), `R` (request, whispered), `B` (batch,
 whispered, one record each, about 3 per second). Others: `Z` (Zennit's answer), `D` and `S` (the dice),
-`T` (a summon its caster deleted), `K` (a summon card Zennit sold), `N` (the sender's own snowballs thrown at Zennit, for the leaderboard; never from his characters), `P` (one giver's fish totals, from Zennit's client only; the newest per giver wins, and a total of 0 takes them off the board), `A` (Zennit's client names the character he is playing, so others learn his
-alts), `X` (a request to reset), `F` (how a player felt about a week, kept only by Zennit's and the admin's clients), `V` (a chapter shown to the group, party or raid only), `L` (a line Zennit wrote for himself: a postcard or his out-of-office, only from his characters, the newest kept) `W` (what a group member saw of a ritual, kept only by Zennit's client: see below), `Q` and `Y` (a question for Zennit's client, sent to the group and the guild, and his answer whispered back to whoever asked: `/sc ask`) and `C` (the admin started or stopped
+`T` (a summon its caster deleted), `K` (a summon card Zennit sold), `O` (the sender's own snowballs thrown at Zennit, for the leaderboard; never from his characters), `P` (one giver's fish totals, from Zennit's client only; the newest per giver wins, and a total of 0 takes them off the board), `A` (Zennit's client names the character he is playing, so others learn his
+alts; it carries his account's stamp), `G` (every client passes on the characters it knows are his, with the same stamp), `N` (the end of a
+reply to a request), `X` (a request to reset), `F` (how a player felt about a week, kept only by Zennit's and the admin's clients), `V` (a chapter shown to the group, party or raid only), `L` (a line Zennit wrote for himself: a postcard or his out-of-office, only from his characters, the newest kept) `W` (what a group member saw of a ritual, kept only by Zennit's client: see below), `Q` and `Y` (a question for Zennit's client, sent to the group and the guild, and his answer whispered back to whoever asked: `/sc ask`) and `C` (the admin started or stopped
 a season: see [The season](#the-season)). AceComm, LibSerialize and LibDeflate are not used; the addon has its own
 small encoder and send queue.
 
 A `H` carries the number of summons, the latest summon time, the version, the time of the newest answer from
-Zennit, the newest reset everyone was asked to make (with the admin's stamp; a player's own reset is never sent) and the time of
-the newest season mark, so a peer notices a missing summon, a changed answer, a missed reset or a missed season start or stop
-(season marks are sent in reply to its `R`).
+Zennit, the newest reset everyone was asked to make (with the admin's stamp; a player's own reset is never sent), the time of
+the newest season mark and, from 0.29, a fingerprint: a sum of a hash of every summons as it travels (with its answer), every
+season mark and every character known to be Zennit's. Two clients with the same log have the same fingerprint, whatever order
+they heard things in, so any difference shows, an older summons or an older answer included, whoever holds more. When they
+differ, each asks the other. Its `R` lists its own sums week by week (twenty weeks, and one for everything older), and the reply
+is only the weeks that differ, newest first, ending with an `N`; a reply cut short at 500 summons is followed by a request for the
+part before the cut, so a long log arrives whole. A request that brought nothing is not repeated for the same pair of
+fingerprints for ten minutes, so a difference that cannot close (a summons one side refuses) costs one exchange, not a loop.
+Season marks, cards, tombstones and Zennit's characters are sent with every reply. A friend still on 0.28 gets the old exchange
+(everything since the last reset, newest first). Replies wait behind everything else in the send queue, so a new summons or an
+answer from Zennit is never stuck behind a newcomer's history.
 
 Merge rules:
 - Same event ID: keep the confirmed copy; if both are (or neither is), keep the earlier write.
 - Your own events are authoritative and nobody can add one against you.
 - A live `E` is accepted only if the sender is the caster, or, for a record Zennit's client filed (a 12th field names him), Zennit.
   Only the summoned can file one, and only a summons of himself.
-- A `B` is accepted only by whisper and only soon after you sent a `R` to that sender (the window renews with
-  each batch message, so a long log still arrives whole).
-- A deleted summon stays deleted: only its caster can send the `T`, and a copy of it is refused afterwards.
-- Anything from before the last reset is refused.
-- Of two answers from Zennit for one summon, the later wins.
+- A `B` is accepted only by whisper and only within fifteen minutes of sending a `R` to that sender (the window renews with
+  each batch message; it is long because a reply can wait behind replies to others).
+- A deleted summon stays deleted: only its caster can send the `T`, and a copy of it is refused afterwards (a reset keeps the
+  tombstones of summons made after its mark).
+- Anything from before the last reset is refused, and a client never files a summons at or before it (with a clock behind the
+  admin's, it is filed just after the mark).
+- Of two answers from Zennit for one summon, the later wins; two made in the same second are decided by what they say, so every
+  client keeps the same one. An answer counts from any of his characters.
 - Points and kind are recomputed locally, never read from the wire.
 - Messages from a newer protocol major version are ignored.
 
@@ -305,8 +323,8 @@ Two things make it visible and countable:
 - **Summon cards, like a coffee card** (`Cards.lua`). A card is **prepaid silver**: N punches bought once at a price Zennit sets
   (`/sc card offer 5 200`: five punches for 200 silver, against 250 at the counter). Each time he asks for silver from the
   holder, **a punch pays it** at the card's price per punch and the Index says so ("Bo's card pays the 40 silver: a punch used, 3 left");
-  his popup's button reads "Take a punch (card: 3 left)". Cards are issued only by Zennit's client (`/sc card sell Bo`, or from the payment popup) and sent to
-  everyone (message `K`, with his hello and to anyone who asks for events), so a holder can see their balance in `/sc cards`.
+  his popup's button reads "Take a punch (card: 3 left)". Cards are issued only by Zennit's client (`/sc card sell Bo`, or from the payment popup; the name's case does not matter) and sent to
+  everyone (message `K`: with his hello, every card of anyone who still has a punch, used-up ones too; to anyone who asks for events, every card), so a holder can see their balance in `/sc cards`.
   **Punches are not stored anywhere:** they are counted from the summons he settled with a punch (an answer carrying the card flag),
   oldest card first, so every client agrees and nothing drifts. A reset clears the cards with the summons. The answer's flags digit gains
   a bit (4 = paid by a punch): older clients would read it as "closed the Index", so update everyone together.
@@ -370,7 +388,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Area | State |
 |---|---|
 | Skeleton, diagnostics panel, store, tallies, scoring, badges, panel, Zennit gag | Verified in the live client (solo, with `/sc fake`) |
-| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 120 tests now; the ones added since (0.27 to 0.32) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
+| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 149 tests now; the ones added since (0.27 to 0.30) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
 | The live-client checklist (`/sc check`, `design/verification.md`) | The automatic checks passed in the live client on 2026-10-06. The checks done with a friend are still to do: they are how the rest of this table gets confirmed |
 | Real Ritual of Summoning detection | Verified in the live client (with Poogs): the detector fired and the summons synced. Not yet confirmed: when the game reports the ritual done, which decides whether helpers are seen without the prompt (run one with `/sc debug` on the caster's client). Summons by a caster without the addon are filed by Zennit's client (never run live); what a target presses on the game's own summon prompt is read by hooking `C_SummonInfo` (written, never run live); raid helpers in other subgroups are checked now but not yet tried in a raid |
 | Addon messages between two real clients | Verified: party, guild and whisper pings and replies arrive. Names show as `Name Surname` here (not `Name-Realm`), so the addon compares plain first-word names |
@@ -384,10 +402,8 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Gag and voice clips | The gag is an original drawing (`Media/gag_wag_sheet.tga`) with Zennit's recorded line and 13 recorded party lines. The voice clip categories are silent: the one take so far is in no category |
 | Release | Published on GitHub (v0.22.0, v0.25.3, v0.26.0) and, from v0.26.0, on CurseForge. Actions > Release publishes the TOC's version; a release zip carries whatever clips are committed |
 | 0.28.1: resets, closed weeks, the silver watcher, BattleTag hashes | Checked outside the game only (the self-test and a headless run) |
-| 0.29.0: the fish book (fish traded or mailed to Zennit) | Checked outside the game only (the self-test and a headless run); which trade and mail calls the 12.0 client lets an addon read is untested |
-| 0.30.0: the leaderboard (summons of Zennit, fish), fish totals shared by sync | Checked outside the game only (the self-test, 118/118 in a headless run) |
-| 0.31.0: snowballs thrown at Zennit, a third board on the leaderboard | Checked outside the game only (the self-test, 119/119 in a headless run); the Snowball's spell ID (21343) and the cast events it raises are untested in this client |
-| 0.32.0: wrapped fish, counted when Zennit opens a present that was traded or mailed to him | Checked outside the game only (the self-test, 120/120 in a headless run); the present's item names, opening it through `C_Container.UseContainerItem`, and the bag reads are untested in this client |
+| 0.29.0: the review of counting and sync (sync fingerprints and week-by-week requests, Zennit's characters shared, each summons filed once, the race fixes, undo, cards, resets, per-character badges) | Checked outside the game only (the self-test, 145/145, and simulated clients). A friend on 0.28 still syncs the old way, but no longer teaches a 0.29 client Zennit's alts until his own client is on 0.29 |
+| 0.30.0: the fish book (fish traded or mailed to Zennit, loose or wrapped in a present he opens), the leaderboard (summons of Zennit, fish, snowballs), snowballs thrown at Zennit | Checked outside the game only (the self-test and a headless run); which trade, mail and bag calls the 12.0 client lets an addon read, the present's item names, and the Snowball's spell ID (21343) are untested in this client |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.
@@ -437,7 +453,9 @@ From the week of **Monday 5 October 2026** the group has to beat Zennit at his o
 numbers behind it, is in `design/lenses.md`):
 
 - **Only summons of Zennit count**, up to **10** of them each week. Any after that are logged as usual but "filed under
-  'enthusiasm'": the race ignores them. Summons of each other still count for the tally and badges.
+  'enthusiasm'": the race ignores them. Summons of each other still count for the tally and badges. From the week of
+  **Monday 9 November 2026**, they do not start the race either: a week in which nobody summoned him has no winner, as a
+  week with no summons at all has none (`Week.RULES.needsHim`; earlier weeks keep their results).
 - **The Index keeps the season close.** Zennit's edge on the dice (the +10) moves with the season's lead, worked out from
   the weeks before the current one. At a lead of two weekly wins it is **+5** for the side behind: his edge shrinks when
   he is ahead (to +5), and grows when the group is ahead (to +15). At three or more it moves by **10** (to +0, or +20);
@@ -583,5 +601,6 @@ A week closes two days after it ends. Zennit can then no longer answer a summon 
 the close (the silver of a summons he asked silver for can still be paid, which moves no points). The week's result is worked out
 from the log, never frozen on one client, so every client that holds the same log agrees on it; a summons made in the week that
 reaches a client late still counts, the same way everywhere. Zennit's alts are learned over
-sync: his own client announces the character he is playing, and everyone else scores a summon of any of them as a summon of
-Zennit (up to 10 alts are kept).
+sync: his own client announces the character he is playing (and counts it as his itself), every client passes on the ones it
+knows, and everyone scores a summon of any of them as a summon of Zennit. Up to 10 alts are kept, the first 10 by name, so every
+client keeps the same ones.

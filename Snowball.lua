@@ -1,5 +1,5 @@
 -- Snowball: who has thrown a snowball at Zennit. Only the thrower's client sees its own cast for certain (as with a ritual), so the
--- thrower's client counts its own throws at him and tells everyone its totals (message N): each client keeps the newest line per
+-- thrower's client counts its own throws at him and tells everyone its totals (message O): each client keeps the newest line per
 -- thrower, and the leaderboard (Leaders.lua) ranks them. Zennit's client also says who hit him. A throw from someone without the
 -- addon is not seen. /sc snowballs, and the leaderboard's third board.
 local ADDON, ST = ...

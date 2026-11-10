@@ -146,7 +146,7 @@ local function buildSummary(f)
             T.Paint("dim", "BADGES.SYS"),
         }
         for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.db.badges[b.id]
+            local got = ST.Scoring.Badges()[b.id]
             lines[#lines + 1] = got and ("[X] " .. b.name .. "  " .. T.Paint("dim", fmtTime(got.earned, "%Y-%m-%d")))
                 or T.Paint("dim", "[ ] " .. b.name)
         end
@@ -388,7 +388,7 @@ local function buildBadges(f)
     return function()
         local rows = {}
         for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.db.badges[b.id]
+            local got = ST.Scoring.Badges()[b.id]
             rows[#rows + 1] = { got and ("[X] " .. b.name) or T.Paint("dim", "[ ] " .. b.name),
                 got and "EARNED" or T.Paint("dim", "LOCKED"), got and T.Paint("dim", fmtTime(got.earned)) or T.Paint("dim", b.how or "") }
         end

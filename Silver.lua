@@ -221,7 +221,7 @@ function Silver.Known(payer)
         end
     end
     for _, card in pairs(ST.db.cards or {}) do
-        if base(card.holder) == who then return true end
+        if base(card.holder):lower() == who:lower() then return true end -- a card sold before 0.29 may be in lower case
     end
     local address = ST.Sync.state and ST.Sync.state.address
     return address ~= nil and address[who] ~= nil

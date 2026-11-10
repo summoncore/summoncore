@@ -2,10 +2,13 @@
 -- double-counting is impossible. Only this module touches the network.
 --
 -- Wire format: "<proto>~<type>~<body>"
---   H  HELLO    body: count|latest|addonVersion
+--   H  HELLO    body: count|latest|addonVersion|answer|resetAll|mark|stamp|digest   (digest from 0.29: Sync.Digest)
 --   E  EVENT    body: record               (live broadcast of a new summon; sender must be the caster)
---   R  REQUEST  body: since                (asks the whisper target for events with time > since)
---   B  BATCH    body: record               (one record per message, whispered in reply to R)
+--   R  REQUEST  body: since                (before 0.29: asks the whisper target for events with time > since)
+--               body: since|upto|top|sums  (0.29: the requester's week-by-week sums, so only the weeks that differ come back)
+--   B  BATCH    body: record               (one record per message, whispered in reply to R, newest first)
+--   N  DONE     body: sent|capped|oldest|digest   (0.29: ends the reply to a week-by-week R)
+--   G  ZENNIT'S CHARACTERS  body: stamp|name,name...   (0.29: every client passes on the characters it knows are his)
 --   L  LINE     body: key|time|text        (a line Zennit wrote for himself: a postcard "pc:<mapID>" or his out-of-office "away")
 --   F  FEELING  body: week|role|n           (how a player felt about a week: role p (the group) or z (Zennit), n 1 good to 3 bad;
 --                                           kept only by Zennit's and the admin's clients, shown as counts)
@@ -17,7 +20,7 @@
 --   Y  REPLY    body: qid|key|status|value  (his client's answer, whispered back to whoever asked; only from his characters)
 --   P  FISH     body: giver|total|week|weekStart|stamp  (one giver's line of the fish book, Fish.lua: only from his characters;
 --                                           everyone keeps the newest per giver, for the leaderboard)
---   N  SNOWBALL body: total|week|weekStart|stamp|live  (the sender's own snowballs thrown at Zennit, Snowball.lua; live: 1 when one
+--   O  SNOWBALL body: total|week|weekStart|stamp|live  (the sender's own snowballs thrown at Zennit, Snowball.lua; live: 1 when one
 --                                           was just thrown, so his client says who hit him)
 -- record = id|caster|target|assist1,assist2|mapID|subzone|time|confirmed|wrote[|answer[|w[|by]]]
 -- A record filed by Zennit's client for a caster without the addon carries "by" (his name): its id starts with it, and only he
@@ -32,16 +35,22 @@ local PROTO = 1            -- major protocol version; messages from a higher one
 local MAX_MSG = 250        -- addon message limit is 255 bytes
 local MAX_NAME = 24
 local MAX_SUBZONE = 40
+Sync.MAX_SUBZONE = MAX_SUBZONE
 local MAX_ASSISTANTS = 2
 local MAX_ALTS = 10        -- most alts of Zennit that we will learn
 local MAX_BATCH = 500      -- most events sent in reply to one REQUEST
 local SEND_INTERVAL = 0.34 -- about 3 messages per second
 local REQUEST_COOLDOWN = 10
 local HELLO_BACK_COOLDOWN = 30
-local REQUEST_WINDOW = 120 -- how long after our REQUEST (or the last BATCH message) we accept more from that sender
+-- How long after our REQUEST (or the last BATCH message) we accept more from that sender. It is long because the reply waits
+-- behind any other replies the sender is making: a newcomer's history is a few minutes of whispers.
+local REQUEST_WINDOW = 900
+local ASK_AGAIN = 600      -- a hello that says the same as the last one we asked about is not asked about again for this long
+local BUCKETS = 20         -- weeks a REQUEST lists one by one; anything older shares one more sum
 
 local function newState()
-    return { queue = {}, requested = {}, lastReq = {}, lastHelloBack = {}, added = 0, witness = {} }
+    return { queue = {}, bulk = {}, requested = {}, lastReq = {}, lastHelloBack = {}, added = 0, witness = {},
+        peer = {}, asked = {}, rounds = {} }
 end
 Sync.newState = newState
 Sync.state = newState()
@@ -78,6 +87,22 @@ end
 
 local function unesc(s)
     return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
+end
+
+-- The first n bytes of s, never ending in half a letter: a UTF-8 character cut in two would arrive as a different string
+-- from the one its sender keeps (a subzone in a Russian or Korean client, say).
+function Sync.Clip(s, n)
+    s = tostring(s or "")
+    if #s <= n then return s end
+    s = s:sub(1, n)
+    local i = #s
+    while i > 0 and s:byte(i) >= 0x80 and s:byte(i) < 0xC0 do i = i - 1 end -- back over continuation bytes to the lead
+    if i > 0 and s:byte(i) >= 0xC0 then
+        local lead = s:byte(i)
+        local size = lead >= 0xF0 and 4 or lead >= 0xE0 and 3 or 2
+        if #s - i + 1 < size then s = s:sub(1, i - 1) end -- the last character is cut short: drop it
+    end
+    return s
 end
 
 local function split(s, sep)
@@ -159,7 +184,9 @@ local function laterResponse(ev, a, b)
     if b and ST.Week.LateAnswer(ev, b) then b = nil end
     if not a then return b end
     if not b then return a end
-    return b.time > a.time and b or a
+    if b.time ~= a.time then return b.time > a.time and b or a end
+    -- two answers made in the same second: pick by what they say, never by which arrived first, so every client keeps the same
+    return respString(b) > respString(a) and b or a
 end
 
 function Sync.Encode(id, ev)
@@ -169,7 +196,7 @@ function Sync.Encode(id, ev)
     -- client); most records stay 10 fields, as before
     return table.concat({
         esc(id), esc(ev.caster), esc(ev.target), table.concat(assist, ","),
-        ev.mapID and tostring(ev.mapID) or "", esc((ev.subzone or ""):sub(1, MAX_SUBZONE)),
+        ev.mapID and tostring(ev.mapID) or "", esc(Sync.Clip(ev.subzone, MAX_SUBZONE)),
         tostring(ev.time), ev.confirmed and "1" or "0", tostring(ev.wrote or ev.time),
         respString(ev.response), (ev.writ and "w") or (ev.by and "") or nil, ev.by and esc(ev.by) or nil,
     }, "|")
@@ -271,6 +298,75 @@ function Sync.Merge(id, ev, sender, live, opts)
 end
 
 ----------------------------------------------------------------------
+-- Fingerprints (0.29): a hello used to carry only the number of summons and the newest times, which cannot see two logs
+-- that differ in an older summons or an older answer. Now it also carries a sum of a hash of every record as it travels,
+-- the same whatever order the records were added in, so any difference shows, whoever holds more.
+----------------------------------------------------------------------
+local TWO32 = 4294967296
+
+local function hash(s)
+    local h = 5381
+    for i = 1, #s do h = (h * 33 + s:byte(i)) % TWO32 end
+    return h
+end
+
+-- Eight hex digits, written in two halves: string.format("%x") of a number past 2^31 is not safe on every client.
+local function hex8(n)
+    return string.format("%04x%04x", math.floor(n / 65536), n % 65536)
+end
+
+-- As short as it can be, for the sums a request lists (an empty week is "0").
+local function hexShort(n)
+    local hi, lo = math.floor(n / 65536), n % 65536
+    if hi > 0 then return string.format("%x%04x", hi, lo) end
+    return string.format("%x", lo)
+end
+
+-- One record's hash. Two clients holding the same copy of a summons, with the same answer, give the same number.
+local function eventHash(id, ev)
+    return hash(Sync.Encode(id, ev))
+end
+
+-- Zennit's characters as every client keeps them (lower case: the list is compared without case).
+local function altsOf()
+    local s = ST.db.settings
+    return s and s.zenitAlts or {}
+end
+
+-- The hello's fingerprint of everything sync shares that the race reads: every summons (not test ones), the season marks and
+-- Zennit's characters. Eight hex digits.
+function Sync.Digest()
+    local sum = 0
+    for id, ev in pairs(ST.db.events) do
+        if not ev.fake then sum = (sum + eventHash(id, ev)) % TWO32 end
+    end
+    for _, m in ipairs(ST.Week.Marks()) do sum = (sum + hash("C|" .. m.kind .. "|" .. m.time)) % TWO32 end
+    for _, n in ipairs(altsOf()) do sum = (sum + hash("G|" .. n:lower())) % TWO32 end
+    return hex8(sum)
+end
+
+-- Which sum a summons at time t falls in, counting down from the week starting at `top`: 1 is that week and anything after
+-- it, 2 to BUCKETS one week each before it, and BUCKETS + 1 everything older.
+local WEEK = 7 * 86400
+local function bucketOf(t, top)
+    if t >= top then return 1 end
+    return math.min(math.floor((top - 1 - t) / WEEK) + 2, BUCKETS + 1)
+end
+
+-- The sums of the summons with since < time (and time < upto, unless upto is 0), one per bucket.
+function Sync.Buckets(since, upto, top)
+    local sums = {}
+    for i = 1, BUCKETS + 1 do sums[i] = 0 end
+    for id, ev in pairs(ST.db.events) do
+        if not ev.fake and ev.time > since and (upto == 0 or ev.time < upto) then
+            local b = bucketOf(ev.time, top)
+            sums[b] = (sums[b] + eventHash(id, ev)) % TWO32
+        end
+    end
+    return sums
+end
+
+----------------------------------------------------------------------
 -- Sending
 ----------------------------------------------------------------------
 -- Where a whisper to `name` must go: the full name the game gave when we last heard from them ("Father-Realm"), which is
@@ -281,25 +377,37 @@ function Sync.Address(name)
     return book and book[ST.baseName(name) or ""] or name
 end
 
-local function enqueue(channel, target, typ, body)
+-- bulk: a record of a reply to a REQUEST, which waits behind everything else (a newcomer's history can be minutes of whispers,
+-- and a new summons or an answer from Zennit should not wait for it).
+local function enqueue(channel, target, typ, body, bulk)
     local payload = PROTO .. "~" .. typ .. "~" .. body
     if #payload > MAX_MSG then return false end
     if channel == "WHISPER" then target = Sync.Address(target) end
-    local q = Sync.state.queue
+    local q = bulk and Sync.state.bulk or Sync.state.queue
     q[#q + 1] = { channel = channel, target = target, payload = payload }
     return true
 end
 
--- Sends up to max queued messages. The ticker calls this with 1 about three times a second.
+-- Sends up to max queued messages, the urgent ones first. The ticker calls this with 1 about three times a second.
 function Sync.Pump(max)
     local n = 0
-    local q = Sync.state.queue
-    while n < max and #q > 0 do
-        local m = table.remove(q, 1)
+    local st = Sync.state
+    st.bulk = st.bulk or {}
+    while n < max and (#st.queue > 0 or #st.bulk > 0) do
+        local m = table.remove(#st.queue > 0 and st.queue or st.bulk, 1)
         Sync.transport(m.channel, m.target, m.payload)
         n = n + 1
     end
     return n
+end
+
+-- Is a reply to `name` still waiting in our queue?
+local function replying(name)
+    local to = Sync.Address(name)
+    for _, m in ipairs(Sync.state.bulk or {}) do
+        if m.target == to then return true end
+    end
+    return false
 end
 
 -- "0.19.1" -> 0, 19 (major and minor; nil for anything that is not a version).
@@ -328,19 +436,24 @@ local function lastMarkTime()
 end
 
 -- The fifth field is the newest reset everyone was asked to make (db.resetAll, from the admin's /sc reset all), never a friend's
--- own reset, and a seventh carries the admin's stamp with it, as season marks do. Clients before 0.28.1 read only the first six.
+-- own reset, and a seventh carries the admin's stamp with it, as season marks do (empty when there is no reset). The eighth is
+-- the fingerprint (Sync.Digest). Clients before 0.28.1 read only the first six, and before 0.29 only the first seven.
 local function helloBody()
     local resetAll = ST.db.resetAll or 0
-    return string.format("%d|%d|%s|%d|%d|%d%s", ST.Store.Count(), ST.Store.Latest(), ST.version, ST.Store.LatestResponse(),
-        resetAll, lastMarkTime(), resetAll > 0 and ("|" .. ST.ADMIN_HASH) or "")
+    return string.format("%d|%d|%s|%d|%d|%d|%s|%s", ST.Store.Count(), ST.Store.Latest(), ST.version, ST.Store.LatestResponse(),
+        resetAll, lastMarkTime(), resetAll > 0 and ST.ADMIN_HASH or "", Sync.Digest())
 end
 
 function Sync.Hello(channel, target)
     if channel then
         enqueue(channel, target, "H", helloBody())
     else
-        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "H", helloBody()) end
+        -- his own client counts the character he is playing among his, and says so with everything else
+        if ST.IsZennitAccount() then Sync.LearnAlt(Sync.myName()) end
+        local body = helloBody()
+        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "H", body) end
         Sync.SendFeelings() -- our own answers again, so Zennit's and the admin's clients catch up
+        Sync.SendAlts()     -- and the characters we know are his, so a friend who missed one learns it
         Sync.SendSnowballs()  -- and our snowballs at him, for everyone's leaderboard
         if ST.IsZennitAccount() then
             Sync.SendAlt()
@@ -362,7 +475,7 @@ function Sync.EncodeWitness(n)
     local helpers = {}
     for i, h in ipairs(n.helpers or {}) do if i <= 4 then helpers[#helpers + 1] = esc(h) end end
     return table.concat({ esc(n.caster or ""), esc(n.target or ""), table.concat(helpers, ","), n.mapID and tostring(n.mapID) or "",
-        esc((n.subzone or ""):sub(1, MAX_SUBZONE)), tostring(n.time), n.helping and "1" or "0" }, "|")
+        esc(Sync.Clip(n.subzone, MAX_SUBZONE)), tostring(n.time), n.helping and "1" or "0" }, "|")
 end
 
 function Sync.DecodeWitness(body, sender)
@@ -474,13 +587,19 @@ function Sync.SendCard(card, target)
     end
 end
 
--- Resends every card that still has a punch (up to 20), if this client is Zennit's.
+-- Resends cards, if this client is Zennit's. Punches are spent oldest card first (Cards.lua), so a client that missed a card
+-- that is now used up would charge its punches to the holder's newer card: every card of a holder who still has a punch goes
+-- with his hello (newest first, up to 40), and every card (up to MAX_CARDS) is whispered to a client that asked for events.
+local CARDS_PER_HELLO = 40
 function Sync.SendCards(target)
     if not (ST.Cards and ST.Week.IsZennit(Sync.myName())) then return end
-    local sent = 0
-    for _, card in ipairs(ST.Cards.Sorted()) do
-        if sent >= 20 then break end
-        if ST.Cards.PunchesLeft(card) > 0 then
+    local list, sent, left = ST.Cards.Sorted(), 0, {}
+    for i = #list, 1, -1 do
+        local card = list[i]
+        if sent >= (target and MAX_CARDS or CARDS_PER_HELLO) then break end
+        local holder = card.holder:lower()
+        if left[holder] == nil then left[holder] = ST.Cards.Left(card.holder) > 0 end
+        if target or left[holder] then
             Sync.SendCard(card, target)
             sent = sent + 1
         end
@@ -517,16 +636,64 @@ function Sync.SendSnowballs(total, week, weekStart, live, target)
     if total < 1 and not live then return end
     local body = string.format("%d|%d|%d|%d|%d", total, week, weekStart or 0, time(), live and 1 or 0)
     if target then
-        enqueue("WHISPER", target, "N", body)
+        enqueue("WHISPER", target, "O", body)
     else
-        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "N", body) end
+        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "O", body) end
     end
 end
 
 -- Zennit's own client says "the character I am playing is his": everyone else cannot see his Battle.net account,
--- so this is how they learn his alts. The sender is the character; nothing else is claimed.
+-- so this is how they learn his alts. The sender is the character; nothing else is claimed. It carries the stamp of his
+-- account (ST.ZENNIT_HASH), as season marks carry the admin's, so one friend's /run cannot make everyone count them as him
+-- (it keeps out mischief, not a friend who reads the code). Clients before 0.29 read only the "1".
 function Sync.SendAlt()
-    for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "A", "1") end
+    for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "A", "1|" .. ST.ZENNIT_HASH) end
+end
+
+-- Whether `base` is one of Zennit's characters by the lists alone (his names and the alts learned).
+local function listedAsZennit(base)
+    local s = ST.db.settings
+    for _, list in ipairs({ s and s.zenitNames or { "Zennit" }, s and s.zenitAlts or {} }) do
+        for _, n in ipairs(list) do
+            if ST.baseName(n) and ST.baseName(n):lower() == base:lower() then return true end
+        end
+    end
+    return false
+end
+
+-- Adds a character to Zennit's alts. The list is kept as a set in order of name, and past MAX_ALTS the last by name is
+-- dropped, so every client that has heard of the same characters keeps the same ones whatever order it heard of them in: the
+-- race counts summons of his alts, and every client must count the same. Returns "learned", "kept", "rejected:full" or "bad".
+function Sync.LearnAlt(name)
+    local s, base = ST.db.settings, ST.baseName(name)
+    if not s or not validName(base) then return "bad" end
+    if listedAsZennit(base) then return "kept" end
+    s.zenitAlts = s.zenitAlts or {}
+    local alts = s.zenitAlts
+    alts[#alts + 1] = base
+    table.sort(alts, function(a, b) return a:lower() < b:lower() end)
+    if #alts > MAX_ALTS and table.remove(alts) == base then return "rejected:full" end
+    return "learned"
+end
+
+-- Passes on every character we know is Zennit's (G), stamped like his own A: to `target` by whisper, or to everyone. Each
+-- client does it with its hello and in reply to a request, so a friend who was away when he announced one still learns it.
+function Sync.SendAlts(target)
+    local alts = altsOf()
+    if #alts == 0 then return end
+    local head, names = ST.ZENNIT_HASH .. "|", {}
+    local function send()
+        if #names == 0 then return end
+        local body = head .. table.concat(names, ",")
+        if target then enqueue("WHISPER", target, "G", body)
+        else for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "G", body) end end
+        names = {}
+    end
+    for _, n in ipairs(alts) do
+        if #head + #table.concat(names, ",") + #esc(n) + 8 > MAX_MSG then send() end
+        names[#names + 1] = esc(n)
+    end
+    send()
 end
 
 ----------------------------------------------------------------------
@@ -696,6 +863,25 @@ local function announceSoon()
     C_Timer.After(ANNOUNCE_QUIET, check)
 end
 
+-- Asks `name` for summons we may lack. A friend on 0.29 or later (its hello had a fingerprint) gets our sums week by week,
+-- for the weeks before `upto` (0: up to now), and sends back only the weeks that differ, newest first, then an N. An older one
+-- gets the old request, for everything since our last reset. Never asks for what a reset removed.
+local function request(name, upto)
+    local st = Sync.state
+    local since = ST.db.resetAt or 0
+    st.requested[name] = Sync.now()
+    local peer = st.peer[name]
+    if not (peer and peer.digest) then return enqueue("WHISPER", name, "R", tostring(since)) end
+    upto = upto or 0
+    local top = ST.Week.Start(upto > 0 and math.min(upto - 1, time()) or time())
+    local sums = {}
+    for i, s in ipairs(Sync.Buckets(since, upto, top)) do sums[i] = hexShort(s) end
+    local mine = Sync.Digest()
+    st.asked[name] = { theirs = peer.digest, mine = mine, at = Sync.now() }
+    st.rounds[name] = { start = mine }
+    return enqueue("WHISPER", name, "R", string.format("%d|%d|%d|%s", since, upto, top, table.concat(sums, ",")))
+end
+
 -- Returns a short result string describing what happened (used by the self-test).
 function Sync.OnMessage(text, channel, sender)
     local full = sender
@@ -713,37 +899,55 @@ function Sync.OnMessage(text, channel, sender)
     local now = Sync.now()
 
     if typ == "H" then
-        local count, latest, respT, theirReset, theirMark, resetStamp = body:match("^(%d+)|(%d+)|[^|]*|?(%d*)|?(%d*)|?(%d*)|?(%x*)")
-        count, latest, respT, theirReset = tonumber(count), tonumber(latest), tonumber(respT) or 0, tonumber(theirReset) or 0
-        theirMark = tonumber(theirMark) or 0
-        if not count then return "bad" end
-        local myCount, myLatest, myResp = ST.Store.Count(), ST.Store.Latest(), ST.Store.LatestResponse()
-        local myMark = lastMarkTime()
+        local f = split(body, "|")
+        local count, latest = tonumber(f[1]), tonumber(f[2])
+        if not count or not latest then return "bad" end
+        local respT, theirReset, theirMark = tonumber(f[4] or "") or 0, tonumber(f[5] or "") or 0, tonumber(f[6] or "") or 0
+        local resetStamp = f[7] or ""
+        local digest = f[8] and f[8]:match("^%x%x%x%x%x%x%x%x$")
+        st.peer[sender] = { digest = digest }
         local actions = {}
         -- a friend on another version: say so once
         st.versionNoted = st.versionNoted or {}
         if not st.versionNoted[sender] then
-            local note = Sync.VersionNote(sender, body:match("^%d+|%d+|([^|]*)"), ST.version)
+            local note = Sync.VersionNote(sender, f[3], ST.version)
             if note then
                 st.versionNoted[sender] = true
                 if not Sync.quiet then ST.print("|cffffd100Version:|r " .. note) end
                 actions[#actions + 1] = "version"
             end
         end
-        -- They may hold something we lack: ask for everything (set union makes repeats harmless).
-        if count > myCount or latest > myLatest or (count == myCount and latest ~= myLatest) or respT > myResp
-            or theirMark > myMark then
-            st.requested[sender] = now
-            enqueue("WHISPER", sender, "R", tostring(ST.db.resetAt or 0)) -- never ask for what a reset removed
+        local behind, ahead
+        local mine = digest and Sync.Digest()
+        if digest then
+            -- A friend on 0.29 or later: the fingerprints say whether the logs differ at all, whoever holds more. Both sides then
+            -- ask, each for what the other has. A hello that says the same as the last one we asked about is not asked about
+            -- again for a while: a difference that cannot close (a summons one of us refuses) would otherwise ask for ever.
+            behind = digest ~= mine
+            if behind then
+                local last = st.asked[sender]
+                if last and last.theirs == digest and last.mine == mine and now - last.at < ASK_AGAIN then behind = false end
+            end
+            -- answer a hello to the group with one of ours, so they ask us too; never answer a whispered one (that is an answer)
+            ahead = digest ~= mine and channel ~= "WHISPER"
+        else
+            -- A friend before 0.29: only counts and times to go on.
+            local myCount, myLatest, myResp = ST.Store.Count(), ST.Store.Latest(), ST.Store.LatestResponse()
+            local myMark = lastMarkTime()
+            behind = count > myCount or latest > myLatest or (count == myCount and latest ~= myLatest) or respT > myResp
+                or theirMark > myMark
+            ahead = count < myCount or latest < myLatest or respT < myResp or theirMark < myMark
+        end
+        -- They may hold something we lack: ask (set union makes repeats harmless).
+        if behind then
+            request(sender, 0)
             actions[#actions + 1] = "request"
         end
-        -- We hold more than they do: tell them so they can ask us.
-        if count < myCount or latest < myLatest or respT < myResp or theirMark < myMark then
-            if not st.lastHelloBack[sender] or now - st.lastHelloBack[sender] >= HELLO_BACK_COOLDOWN then
-                st.lastHelloBack[sender] = now
-                enqueue("WHISPER", sender, "H", helloBody())
-                actions[#actions + 1] = "hello-back"
-            end
+        -- We may hold more than they do: tell them so they can ask us.
+        if ahead and (not st.lastHelloBack[sender] or now - st.lastHelloBack[sender] >= HELLO_BACK_COOLDOWN) then
+            st.lastHelloBack[sender] = now
+            enqueue("WHISPER", sender, "H", helloBody())
+            actions[#actions + 1] = "hello-back"
         end
         -- They took part in a reset everyone was asked to make, after our last one (we were offline, or said no): ask our user
         -- again. Only one with the admin's stamp: clients before 0.28.1 sent a friend's own reset here, unstamped.
@@ -751,28 +955,72 @@ function Sync.OnMessage(text, channel, sender)
             Sync.onReset(sender, theirReset)
             actions[#actions + 1] = "reset-asked"
         end
-        -- They hold more than we do: some of it may be summons we deleted, so tell them (rate limited).
-        if count > myCount or latest > myLatest then
+        -- They may hold summons we deleted, so tell them (rate limited).
+        if (digest and digest ~= mine) or (not digest and (count > ST.Store.Count() or latest > ST.Store.Latest())) then
             if Sync.SendTombstones(sender) then actions[#actions + 1] = "tombstones" end
         end
         return #actions > 0 and table.concat(actions, "+") or "in-sync"
 
     elseif typ == "R" then
-        local since = tonumber(body)
-        if not since then return "bad" end
-        if st.lastReq[sender] and now - st.lastReq[sender] < REQUEST_COOLDOWN then return "ignored:ratelimit" end
+        local since, upto, top, sums = tonumber(body), 0, nil, nil
+        if not since then
+            -- 0.29: the requester's sums week by week; only the weeks that differ are sent
+            local s, u, t, list = body:match("^(%d+)|(%d+)|(%d+)|([%x,]+)$")
+            if not s then return "bad" end
+            since, upto, top, sums = tonumber(s), tonumber(u), tonumber(t), split(list, ",")
+            if #sums ~= BUCKETS + 1 then return "bad" end
+            -- one reply at a time: the next request (for the part before a reply cut short) is welcome once this one has gone
+            if replying(sender) then return "ignored:busy" end
+        elseif st.lastReq[sender] and now - st.lastReq[sender] < REQUEST_COOLDOWN then
+            return "ignored:ratelimit"
+        end
         st.lastReq[sender] = now
-        local sent = 0
-        for _, r in ipairs(ST.Store.Since(since)) do
-            if sent >= MAX_BATCH then break end
-            if enqueue("WHISPER", sender, "B", Sync.Encode(r.id, r.ev)) then sent = sent + 1 end
+        local list = ST.Store.Since(since) -- oldest first
+        if sums then
+            local mine, keep = Sync.Buckets(since, upto, top), {}
+            for _, r in ipairs(list) do
+                if upto == 0 or r.ev.time < upto then
+                    local b = bucketOf(r.ev.time, top)
+                    if mine[b] ~= tonumber(sums[b], 16) then keep[#keep + 1] = r end
+                end
+            end
+            list = keep
+        end
+        -- Newest first: a reply cut short at MAX_BATCH leaves out the oldest, which the next request pages back to (before 0.29
+        -- the oldest went first, and a log past 500 never sent its newest summons at all).
+        local sent, oldest, capped = 0, 0, false
+        for i = #list, 1, -1 do
+            if sent >= MAX_BATCH then capped = true break end
+            if enqueue("WHISPER", sender, "B", Sync.Encode(list[i].id, list[i].ev), true) then
+                sent, oldest = sent + 1, list[i].ev.time
+            end
         end
         Sync.SendTombstones(sender)
         Sync.SendCards(sender)
         Sync.SendFishBoard(sender)
         Sync.SendSnowballs(nil, nil, nil, false, sender)
         Sync.SendMarks(sender)
+        Sync.SendAlts(sender)
+        if sums then
+            enqueue("WHISPER", sender, "N", string.format("%d|%d|%d|%s", sent, capped and 1 or 0, oldest, Sync.Digest()), true)
+        end
         return "batch:" .. sent
+
+    elseif typ == "N" then
+        -- the end of a reply to our request: if it brought something and we still differ, ask again (for the part before the
+        -- cut, if it was cut short). Each round has to bring something, so this ends.
+        if channel ~= "WHISPER" then return "rejected:channel" end
+        local sentN, capped, oldest, digest = body:match("^(%d+)|([01])|(%d+)|(%x%x%x%x%x%x%x%x)$")
+        if not sentN then return "bad" end
+        local round = st.rounds[sender]
+        if not round then return "ignored" end
+        st.rounds[sender] = nil
+        st.peer[sender] = { digest = digest }
+        local mine = Sync.Digest()
+        if mine == digest then return "done" end
+        if mine == round.start then return "done:unchanged" end
+        request(sender, capped == "1" and tonumber(oldest) + 1 or 0)
+        return "again"
 
     elseif typ == "E" or typ == "B" then
         if typ == "B" then
@@ -785,15 +1033,25 @@ function Sync.OnMessage(text, channel, sender)
         local id, ev = Sync.Decode(body)
         if not id then return "rejected:" .. tostring(ev) end
         local result = Sync.Merge(id, ev, sender, typ == "E")
+        local live = typ == "E" and result == "added"
         if result == "added" then
             st.added = st.added + 1
             announceSoon()
-            -- Zennit hears a recorded complaint when a friend summons him (live events only, not history).
-            if typ == "E" and ev.target == Sync.myName() and ST.Gag.IsZennit() then
-                ST.Clips.Play("zenit_land")
-                -- a summons he has already answered, filed by his own client while this record was on its way: the answer moves over
-                if ST.Respond and not ST.Respond.Adopt(id, ev) then ST.Respond.Incoming(id, ev) end
-            end
+        end
+        -- A caster's own record of a summons of Zennit, on his client: if his client filed the same summons itself while this
+        -- record was on its way, the answer moves over and the filed record goes, so the summons is never logged twice. A new live
+        -- record is matched as it always was; one by batch, or one already held, only in a week still open and from
+        -- Respond.FILING_FROM, so a decided week does not change.
+        local adopted
+        if (result == "added" or result == "replaced" or result == "kept") and ev.target == Sync.myName() and not ev.by
+            and ev.caster ~= Sync.myName() and ST.Gag.IsZennit() and ST.Respond
+            and (live or (not ST.Week.EventClosed(ev) and ST.Respond.NewFiling(ev))) then
+            adopted = ST.Respond.Adopt(id, ST.Store.Get(id) or ev)
+        end
+        -- Zennit hears a recorded complaint when a friend summons him (live events only, not history).
+        if live and ev.target == Sync.myName() and ST.Gag.IsZennit() then
+            ST.Clips.Play("zenit_land")
+            if ST.Respond and not adopted then ST.Respond.Incoming(id, ev) end
         end
         return result
     elseif typ == "Z" then
@@ -805,7 +1063,8 @@ function Sync.OnMessage(text, channel, sender)
         rid = unesc(rid)
         local ev = ST.Store.Get(rid)
         if not ev then return "rejected:unknown" end
-        if sender ~= ev.target then return "rejected:sender" end
+        -- only he answers for himself, from any of his characters (the silver can reach him on an alt, and he marks it paid there)
+        if sender ~= ev.target and not (ST.Week.IsZennit(sender) and ST.Week.IsZennit(ev.target)) then return "rejected:sender" end
         if not ST.Store.RESULTS[result] then return "rejected:result" end
         local resp = applyFlags({ result = result, zroll = tonumber(z), sroll = tonumber(r), time = tonumber(rt) }, flags)
         resp.amount = amount
@@ -831,7 +1090,9 @@ function Sync.OnMessage(text, channel, sender)
         local count = 0
         for _ in pairs(ST.db.cards) do count = count + 1 end
         if count >= MAX_CARDS then return "rejected:full" end
-        ST.db.cards[cid] = { id = cid, holder = holder, punches = punches, silver = silver, time = ct }
+        -- the holder as the game writes the name, whatever was typed when it was sold (Cards.Holder)
+        ST.db.cards[cid] = { id = cid, holder = ST.Cards and ST.Cards.Holder(holder) or holder, punches = punches, silver = silver,
+            time = ct }
         if Sync.onCard then Sync.onCard(ST.db.cards[cid]) end
         return "card"
 
@@ -855,7 +1116,7 @@ function Sync.OnMessage(text, channel, sender)
         if ST.Hub then ST.Hub.Refresh() end
         return "fish"
 
-    elseif typ == "N" then
+    elseif typ == "O" then
         -- a player's own snowballs at Zennit: each speaks only for themselves
         if not validName(sender) then return "bad" end
         local total, week, ws, stamp, live = body:match("^(%d+)|(%d+)|(%d+)|(%d+)|([01])$")
@@ -866,14 +1127,21 @@ function Sync.OnMessage(text, channel, sender)
         return ST.Snowball.Heard(sender, total, week, ws, stamp, live == "1")
 
     elseif typ == "A" then
+        -- his own client names the character he is playing; only with his account's stamp (0.29)
         if not validName(sender) then return "bad" end
-        local s = ST.db.settings
-        if not s then return "bad" end
-        s.zenitAlts = s.zenitAlts or {}
-        if ST.Week.IsZennit(sender) then return "kept" end
-        if #s.zenitAlts >= MAX_ALTS then return "rejected:full" end
-        s.zenitAlts[#s.zenitAlts + 1] = sender
-        return "learned"
+        if body ~= "1|" .. ST.ZENNIT_HASH then return "rejected:stamp" end
+        return Sync.LearnAlt(sender)
+
+    elseif typ == "G" then
+        -- someone passes on the characters they know are his, with his stamp
+        local stamp, names = body:match("^(%x+)|(.+)$")
+        if not stamp then return "bad" end
+        if stamp ~= ST.ZENNIT_HASH then return "rejected:stamp" end
+        local learned = false
+        for _, n in ipairs(split(names, ",")) do
+            if Sync.LearnAlt(unesc(n)) == "learned" then learned = true end
+        end
+        return learned and "learned" or "kept"
 
     elseif typ == "F" then
         local week, role, n = body:match("^(%d+)|([pz])|([123])$")
@@ -938,12 +1206,15 @@ function Sync.OnMessage(text, channel, sender)
         return Sync.onReply(sender, unesc(qid), key, status, value)
 
     elseif typ == "T" then
-        -- the caster deleted this summon: nobody else can, so the sender must be the one named in the id
+        -- the caster deleted this summon: nobody else can, so the sender must be the one named in the id (or, for a summons
+        -- one of Zennit's characters wrote, any of his characters: his client deletes from whichever he is playing)
         local id = unesc(body)
-        if #id > 48 or id:sub(1, #sender + 1) ~= sender .. "-" then return "rejected:sender" end
+        local author = ST.Store.Author(id)
+        if #id > 48 or not author then return "rejected:sender" end
+        if author ~= sender and not (ST.Week.IsZennit(sender) and ST.Week.IsZennit(author)) then return "rejected:sender" end
         ST.db.deleted = ST.db.deleted or {}
         if ST.db.deleted[id] then return "kept" end
-        ST.db.deleted[id] = now
+        ST.db.deleted[id] = time() -- a wall-clock time, like the caster's own tombstone (Store.Remove), not this session's GetTime
         ST.db.events[id] = nil
         return "deleted"
 
@@ -988,7 +1259,7 @@ end
 function Sync.Status()
     local st = Sync.state
     ST.print(string.format("Sync: %d summons, latest %s, %d queued, channels: %s", ST.Store.Count(),
-        ST.Store.Latest() > 0 and date("%Y-%m-%d %H:%M", ST.Store.Latest()) or "never", #st.queue,
+        ST.Store.Latest() > 0 and date("%Y-%m-%d %H:%M", ST.Store.Latest()) or "never", #st.queue + #(st.bulk or {}),
         #Sync.channels() > 0 and table.concat(Sync.channels(), ",") or "none"))
 end
 
