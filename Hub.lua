@@ -12,8 +12,8 @@ local ROW_H = 20
 local ORDER = { "party", "zennit", "log", "story", "sync", "tools" }
 local LABELS = { party = "PARTY", zennit = "ZENNIT", log = "LOG", story = "STORY", sync = "SYNC", tools = "TOOLS" }
 -- The old tab names still open the tab that now holds them (Hub.Open("tally") shows the Party tab's Tally section).
-local TAB_OF = { summary = "party", tally = "party", badges = "party", answer = "zennit" }
-local SECTION_OF = { summary = true, tally = true, badges = true }
+local TAB_OF = { summary = "party", tally = "party", badges = "party", leaders = "party", answer = "zennit" }
+local SECTION_OF = { summary = true, tally = true, badges = true, leaders = true }
 
 local window
 local tabs = {}      -- name -> { button, frame, refresh }
@@ -146,7 +146,7 @@ local function buildSummary(f)
             T.Paint("dim", "BADGES.SYS"),
         }
         for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.db.badges[b.id]
+            local got = ST.Scoring.Badges()[b.id]
             lines[#lines + 1] = got and ("[X] " .. b.name .. "  " .. T.Paint("dim", fmtTime(got.earned, "%Y-%m-%d")))
                 or T.Paint("dim", "[ ] " .. b.name)
         end
@@ -351,12 +351,44 @@ local function buildTally(f)
     end
 end
 
+-- The leaderboard (Leaders.lua), three boards side by side: who has summoned Zennit most, who has given him the most fish, and who
+-- has thrown the most snowballs at him.
+local function buildLeaders(f)
+    local function third(i)
+        local p = CreateFrame("Frame", nil, f)
+        p:SetPoint("TOPLEFT", (i - 1) * 258, 0)
+        p:SetPoint("BOTTOM")
+        p:SetWidth(254)
+        return p
+    end
+    local summons = scrollList(third(1), { { "Summons", 110 }, { "Season", 50, "RIGHT" }, { "Week", 40, "RIGHT" }, { "All", 36, "RIGHT" } })
+    local fish = scrollList(third(2), { { "Fish", 130 }, { "Week", 45, "RIGHT" }, { "All", 60, "RIGHT" } })
+    local snow = scrollList(third(3), { { "Snowballs", 130 }, { "Week", 45, "RIGHT" }, { "All", 60, "RIGHT" } })
+    return function()
+        local rows = {}
+        for i, r in ipairs(ST.Leaders.SummonRows()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), T.Paint("amber", r.season), tostring(r.week), tostring(r.all) }
+        end
+        summons.Set(rows, "No summons of Zennit yet.")
+        rows = {}
+        for i, r in ipairs(ST.Fish.Board()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), tostring(r.week), T.Paint("amber", r.count) }
+        end
+        fish.Set(rows, "No fish yet.")
+        rows = {}
+        for i, r in ipairs(ST.Snowball.Board()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), tostring(r.week), T.Paint("amber", r.count) }
+        end
+        snow.Set(rows, "No snowballs yet.")
+    end
+end
+
 local function buildBadges(f)
     local list = scrollList(f, { { "Badge", 270 }, { "Status", 90 }, { "Earned, or what it takes", 380 } })
     return function()
         local rows = {}
         for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.db.badges[b.id]
+            local got = ST.Scoring.Badges()[b.id]
             rows[#rows + 1] = { got and ("[X] " .. b.name) or T.Paint("dim", "[ ] " .. b.name),
                 got and "EARNED" or T.Paint("dim", "LOCKED"), got and T.Paint("dim", fmtTime(got.earned)) or T.Paint("dim", b.how or "") }
         end
@@ -721,6 +753,14 @@ local function buildTools(f)
         for _, line in ipairs(ST.Cards.Lines()) do ST.print(line) end
         show("Who holds a summon card, and the punches left, are in the chat window.")
     end)
+    tool(record, "LEADERBOARD", function() -- also for Zennit, who cannot open the Party tab
+        for _, line in ipairs(ST.Leaders.Lines(10)) do ST.print(line) end
+        show("The leaderboard, summons of Zennit, fish given to him and snowballs thrown at him, is in the chat window.")
+    end)
+    tool(record, "FISH", function()
+        for _, line in ipairs(ST.Fish.Lines()) do ST.print(line) end
+        show("The fish book, who has given Zennit fish, is in the chat window.")
+    end)
     tool(record, "PAST SEASONS", function() -- a few lines for each season: they go to the chat window, which scrolls
         local seasons = ST.Ledger.Seasons()
         for _, s in ipairs(seasons) do
@@ -981,8 +1021,9 @@ local function buildTools(f)
     end
 end
 
--- The Party tab: the party's own pages (Summary, Tally, Badges) as sections under one row of small buttons.
-local SECTIONS = { { "summary", "SUMMARY", buildSummary }, { "tally", "TALLY", buildTally }, { "badges", "BADGES", buildBadges } }
+-- The Party tab: the party's own pages (Summary, Tally, Leaders, Badges) as sections under one row of small buttons.
+local SECTIONS = { { "summary", "SUMMARY", buildSummary }, { "tally", "TALLY", buildTally }, { "leaders", "LEADERS", buildLeaders },
+    { "badges", "BADGES", buildBadges } }
 local party = {} -- party.select(name) shows one of the sections
 
 local function buildParty(f)

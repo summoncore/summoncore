@@ -8,7 +8,9 @@ ST.Detector = Detector
 local PENDING_TTL = 30
 local TICK = 0.5
 local MAX_CANDIDATES = 12 -- longest list the assistants prompt offers
+local OWN_GRACE = 5 -- seconds after our own ritual begins or is committed in which the witness stays quiet, whatever the channel shows
 local pending
+local own -- GetTime() when this client's player last began or committed a ritual of their own; nil once their channel stops
 Detector.writ = false -- a writ armed for the next ritual on Zennit (/sc writ; Week.RULES.writs a week)
 
 local function dbg(msg)
@@ -117,6 +119,7 @@ end
 
 local function startPending(target)
     clearPending()
+    own = GetTime()
     local mapID = C_Map.GetBestMapForUnit("player")
     pending = {
         target = cleanName(target) or cleanName(UnitName("target")),
@@ -126,7 +129,8 @@ local function startPending(target)
     pending.ticker = C_Timer.NewTicker(TICK, function()
         ticks = ticks + 1
         snapshotHelpers()
-        if ticks * TICK > PENDING_TTL then clearPending() end
+        -- a ritual still channelling is still waiting for its clickers: its target and the helpers seen so far are kept
+        if ticks * TICK > PENDING_TTL and not channelingRitual("player") then clearPending() end
     end)
     ST.Trace(string.format("ritual sent on %s%s", tostring(pending.target), Detector.writ and " (a writ is armed)" or ""))
     ST.Clips.Play("ritual") -- a recorded line as the ritual begins
@@ -161,20 +165,27 @@ function Detector.Finish(info)
     local me = ST.Store.me()
     local target = info.target or "Unknown"
     local candidates = Detector.PickCandidates(partyMembers(), info.helpers, target, me, MAX_CANDIDATES)
+    -- the record keeps the time of the ritual, not of the prompt's answer, so it lands in the week it was cast in
+    local at = info.time or time()
     local function save(assistants, confirmed)
         local _, ev, badges = ST.Store.Add({
-            caster = me, target = target, assistants = assistants,
+            caster = me, target = target, assistants = assistants, time = at,
             mapID = info.mapID, subzone = info.subzone or "", confirmed = confirmed, writ = info.writ or nil,
         })
         report(ev, badges)
     end
+    -- neither the one summoned nor the caster can be their own assistant, however they showed up in the snapshot
+    local helpers = {}
+    for _, n in ipairs(info.helpers) do
+        if n ~= target and n ~= me then helpers[#helpers + 1] = n end
+    end
     if #candidates == 0 then
         save({}, true) -- nobody could have helped
-    elseif #info.helpers == 2 and info.target then
-        save(info.helpers, true)
+    elseif #helpers == 2 and info.target then
+        save(helpers, true)
     else
-        dbg(string.format("%d helpers detected, asking caster", #info.helpers))
-        ST.Prompt.Ask(target, candidates, info.helpers, save)
+        dbg(string.format("%d helpers detected, asking caster", #helpers))
+        ST.Prompt.Ask(target, candidates, helpers, save)
     end
 end
 
@@ -183,11 +194,12 @@ local function commit()
     snapshotHelpers()
     local info = {
         target = pending.target, mapID = pending.mapID, subzone = pending.subzone,
-        helpers = {},
+        helpers = {}, time = time(),
     }
     for n in pairs(pending.helpers) do info.helpers[#info.helpers + 1] = n end
     table.sort(info.helpers)
     clearPending()
+    own = GetTime()
     -- a writ armed with /sc writ goes on a summons of Zennit, if one is still to be had; a ritual on anyone else leaves it armed
     if Detector.writ and info.target and ST.Week.IsZennit(info.target) then
         info.writ = ST.Week.WritsLeft(ST.Week.Start()) > 0 or nil
@@ -196,7 +208,7 @@ local function commit()
     Detector.Finish(info)
 end
 
-local lastCommit = 0
+Detector.lastCommit = 0 -- GetTime() of the last commit (on Detector so the self-test can put it back)
 local frame = CreateFrame("Frame")
 for _, ev in ipairs({
     "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START",
@@ -205,7 +217,8 @@ for _, ev in ipairs({
     pcall(frame.RegisterUnitEvent, frame, ev, "player")
 end
 
-frame:SetScript("OnEvent", ST.Safe("the ritual detector", function(_, event, _, a2, a3, a4)
+-- The handler is kept on Detector too, so the self-test can play a ritual's events through it.
+Detector.OnCast = ST.Safe("the ritual detector", function(_, event, _, a2, a3, a4)
     -- SENT args: unit, target, castGUID, spellID. Others: unit, castGUID, spellID.
     local spellID = (event == "UNIT_SPELLCAST_SENT") and a4 or a3
     if not isRitualID(spellID) then return end
@@ -217,13 +230,23 @@ frame:SetScript("OnEvent", ST.Safe("the ritual detector", function(_, event, _, 
         snapshotHelpers()
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- Guard against a second SUCCEEDED for the same cast.
-        if GetTime() - lastCommit < 5 then return end
-        lastCommit = GetTime()
+        if GetTime() - Detector.lastCommit < 5 then return end
+        Detector.lastCommit = GetTime()
         commit()
     else
         clearPending() -- interrupted or failed
+        own = nil
     end
-end))
+end)
+frame:SetScript("OnEvent", Detector.OnCast)
+
+-- Whether this client's player is casting a ritual of their own (or has just committed one): while they are, every channel the
+-- group shows is their ritual's, and the witness below keeps out of it.
+function Detector.OwnRitual()
+    if pending then return true end
+    if not own then return false end
+    return GetTime() - own < OWN_GRACE or channelingRitual("player")
+end
 
 ----------------------------------------------------------------------
 -- The witness (design/lenses.md, Accessibility, G)
@@ -274,9 +297,16 @@ end
 local watcher = CreateFrame("Frame")
 pcall(watcher.RegisterEvent, watcher, "UNIT_SPELLCAST_CHANNEL_START")
 pcall(watcher.RegisterEvent, watcher, "UNIT_SPELLCAST_CHANNEL_STOP")
-watcher:SetScript("OnEvent", ST.Safe("the ritual witness", function(_, event, unit)
-    if type(unit) ~= "string" or pending then return end -- our own ritual is the detector's above
+Detector.OnWitness = ST.Safe("the ritual witness", function(_, event, unit)
+    if type(unit) ~= "string" then return end
     local isPlayer = unit == "player"
+    -- our own ritual's channel has ended; or we began to channel a while after our own ritual with none pending, which can only
+    -- be a click on someone else's portal: either way the witness may watch again
+    if isPlayer and own and not pending and (event == "UNIT_SPELLCAST_CHANNEL_STOP" or GetTime() - own >= OWN_GRACE) then
+        own = nil
+    end
+    -- our own ritual is the detector's above: the caster's client must never name one of its helpers as the caster
+    if Detector.OwnRitual() then return end
     if not (isPlayer or unit:match("^party%d$") or unit:match("^raid%d+$")) then return end
     local name = cleanName(UnitName(unit))
     if event == "UNIT_SPELLCAST_CHANNEL_STOP" then
@@ -285,6 +315,8 @@ watcher:SetScript("OnEvent", ST.Safe("the ritual witness", function(_, event, un
     end
     if not channelingRitual(unit) then return end
     if not watch then
+        -- we were channelling the ritual before anyone we watched: it is our own (say, after a /reload mid-ritual), not theirs
+        if not isPlayer and channelingRitual("player") then return end
         startWatch(unit)
         if not isPlayer then return end
     end
@@ -295,4 +327,5 @@ watcher:SetScript("OnEvent", ST.Safe("the ritual witness", function(_, event, un
     elseif name and name ~= watch.caster then
         if not watch.caster then watch.caster = name else watch.helpers[name] = true end
     end
-end))
+end)
+watcher:SetScript("OnEvent", Detector.OnWitness)
