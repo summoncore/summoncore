@@ -1,5 +1,6 @@
--- Fish: the other thing friends hand Zennit. Fish come to him the way silver does, by trade or by mail, and on his client only this
--- module counts them: each fish taken from a mail or received in a completed trade goes into the fish book (ST.db.fish) with who
+-- Fish: the other thing friends hand Zennit. Fish come to him the way silver does, by trade or by mail (loose, or wrapped in a
+-- present, counted when he opens it), and on his client only this module counts them: each fish taken from a mail or received in a
+-- completed trade goes into the fish book (ST.db.fish) with who
 -- gave it, what it was and how many. Nothing is asked and nothing in the race changes; it is a tally he can read with /sc fish
 -- (also the Tools tab's Fish). The book itself stays on his client; each giver's totals are shared with everyone (message P), so the
 -- leaderboard (Leaders.lua) can rank the givers on every client.
@@ -182,15 +183,16 @@ function Fish.Lines()
 end
 
 -- Fish have arrived on Zennit's client: into the book, and one line in chat.
-local function received(from, item, count, via, itemID)
+-- `text`: what to say in place of "Bo sent you 3 Raw Sagefish by trade." (a present says it was opened).
+local function received(from, item, count, via, itemID, text)
     local entry = Fish.Add(from, item, count, via, itemID)
     if not entry then return end
     local mine = 0
     for _, e in ipairs(book()) do
         if e.from == entry.from then mine = mine + e.count end
     end
-    ST.print(string.format("%s sent you %d %s by %s. Into the fish book: %d fish from %s so far.", entry.from, entry.count,
-        entry.item, via, mine, entry.from))
+    ST.print(string.format("%s Into the fish book: %d fish from %s so far.", text or string.format("%s sent you %d %s by %s.",
+        entry.from, entry.count, entry.item, via), mine, entry.from))
 end
 
 ----------------------------------------------------------------------
@@ -198,6 +200,14 @@ end
 ----------------------------------------------------------------------
 local function call(name, ...)
     local fn = _G[name]
+    if type(fn) ~= "function" then return nil end
+    local results = { pcall(fn, ...) }
+    if not results[1] then return nil end
+    return unpack(results, 2)
+end
+
+-- One call of a function value (C_Container's), or nil if it fails.
+local function call2(fn, ...)
     if type(fn) ~= "function" then return nil end
     local results = { pcall(fn, ...) }
     if not results[1] then return nil end
@@ -221,6 +231,141 @@ local function fishOf(name, count, itemID)
     return { item = name, count = (count and count > 0) and count or 1, itemID = itemID }
 end
 
+----------------------------------------------------------------------
+-- Wrapped presents: what is inside cannot be seen until he opens one, so a present that arrives from a player (by trade or mail,
+-- the same rules as a fish) is noted with who sent it (ST.db.presents). When he opens a present in his bags, the fish in his bags
+-- are counted just before; the fish that turn up in the next minute came out of it, and go into the book as the sender's.
+----------------------------------------------------------------------
+local PRESENT_WORDS = { wrapped = true, present = true, gift = true }
+local NOT_PRESENT = { paper = true, wrap = true, wrapping = true, ribbon = true, recipe = true }
+
+-- Is this item a wrapped present? By the words of its name ("Wrapped Gift", "Gaily Wrapped Present"), never the paper.
+function Fish.IsPresent(name)
+    if type(name) ~= "string" then return false end
+    local yes = false
+    for word in name:lower():gmatch("%a+") do
+        if NOT_PRESENT[word] then return false end
+        if PRESENT_WORDS[word] then yes = true end
+    end
+    return yes
+end
+
+local function presentOf(name, count)
+    name, count = plain(name, "string"), plain(count, "number")
+    if not name or not Fish.IsPresent(name) then return nil end
+    return { present = true, item = name, count = (count and count > 0) and count or 1 }
+end
+
+local PRESENT_DAYS = 60
+
+local function presents()
+    ST.db.presents = ST.db.presents or {}
+    local list, cutoff = ST.db.presents, time() - PRESENT_DAYS * 86400
+    for i = #list, 1, -1 do
+        if list[i].time < cutoff then table.remove(list, i) end
+    end
+    return list
+end
+
+-- A present has arrived from `from` by `via` ("trade" or "mail"): noted, oldest first, one line per present in the stack.
+function Fish.PresentArrived(from, item, count, via)
+    from = base(from)
+    if from == "" then return end
+    local list = presents()
+    for _ = 1, math.min(count or 1, 20) do
+        if #list >= 100 then table.remove(list, 1) end
+        list[#list + 1] = { from = from, item = item, via = via, time = time() }
+    end
+    ST.print(string.format("%s sent you %s by %s. The Index will count any fish in it when you open it.", from, item, via))
+end
+
+-- The fish in his bags now: { [name] = { count, itemID } }. Replaced in the self-test.
+function Fish.BagFish()
+    local out = {}
+    local C = C_Container
+    for bag = 0, 4 do
+        local slots = (C and C.GetContainerNumSlots and call2(C.GetContainerNumSlots, bag)) or call("GetContainerNumSlots", bag)
+        slots = plain(slots, "number") or 0
+        for slot = 1, slots do
+            local link, count, itemID
+            if C and C.GetContainerItemInfo then
+                local info = call2(C.GetContainerItemInfo, bag, slot)
+                if type(info) == "table" then link, count, itemID = info.hyperlink, info.stackCount, info.itemID end
+            else
+                local _, n, _, _, _, _, l, _, _, id = call("GetContainerItemInfo", bag, slot)
+                link, count, itemID = l, n, id
+            end
+            link = plain(link, "string")
+            local name = link and link:match("%[(.-)%]")
+            local fish = fishOf(name, count, plain(itemID, "number") or idOf(link))
+            if fish then
+                local e = out[fish.item] or { count = 0, itemID = fish.itemID }
+                e.count = e.count + fish.count
+                out[fish.item] = e
+            end
+        end
+    end
+    return out
+end
+
+local OPEN_WINDOW = 60
+local opening -- { present, before, at } while a present he opened has not yet given up its fish
+
+-- He has opened the present `item` in his bags: which of the noted presents it is (the oldest of that name, else the oldest), and
+-- the fish in his bags just before.
+function Fish.Opening(item, before)
+    local list = presents()
+    local pick
+    for i, p in ipairs(list) do
+        if p.item == item then pick = i break end
+    end
+    pick = pick or (#list > 0 and 1 or nil)
+    local present = pick and table.remove(list, pick) or nil
+    opening = { present = present, item = item, before = before or Fish.BagFish(), at = time() }
+end
+
+-- His bags have changed: if a present is being opened, the fish that are new since are what was in it. Returns the fish counted.
+function Fish.Opened(after)
+    local o = opening
+    if not o then return 0 end
+    if time() - o.at > OPEN_WINDOW then
+        opening = nil
+        return 0
+    end
+    after = after or Fish.BagFish()
+    local gained = 0
+    for name, e in pairs(after) do
+        local more = e.count - ((o.before[name] and o.before[name].count) or 0)
+        if more > 0 then
+            gained = gained + more
+            if o.present then
+                received(o.present.from, name, more, "present", e.itemID,
+                    string.format("You opened %s's present (%s): %d %s.", o.present.from, o.present.via, more, name))
+            else
+                ST.print(string.format("The present held %d %s, but the Index did not see who sent it (it came before the addon was watching). /sc fish add <name> %d %s puts it in the book.",
+                    more, name, more, name))
+            end
+        end
+    end
+    if gained > 0 then opening = nil end
+    return gained
+end
+
+-- A bag slot he has just used: if it holds a present, it is being opened.
+local function usedItem(bag, slot)
+    if not (ST.db and ST.Gag.IsZennit()) then return end
+    local link
+    if C_Container and C_Container.GetContainerItemInfo then
+        local info = call2(C_Container.GetContainerItemInfo, bag, slot)
+        link = type(info) == "table" and info.hyperlink or nil
+    else
+        link = select(7, call("GetContainerItemInfo", bag, slot))
+    end
+    link = plain(link, "string")
+    local name = link and link:match("%[(.-)%]")
+    if name and Fish.IsPresent(name) then Fish.Opening(name) end
+end
+
 -- Trades: what the other side has put up (slots 1 to 6; the seventh is "will not be traded"), counted once the trade completes.
 local trade = { accepted = false, items = {} }
 
@@ -228,8 +373,8 @@ local function snapshotTrade()
     local items = {}
     for slot = 1, 6 do
         local name, _, quantity = call("GetTradeTargetItemInfo", slot)
-        local fish = fishOf(name, quantity, idOf(call("GetTradeTargetItemLink", slot)))
-        if fish then items[#items + 1] = fish end
+        local item = fishOf(name, quantity, idOf(call("GetTradeTargetItemLink", slot))) or presentOf(name, quantity)
+        if item then items[#items + 1] = item end
     end
     trade.items = items
 end
@@ -250,13 +395,19 @@ function Fish.Trade(event, a, b)
         local t = trade
         trade = { accepted = false, items = {} }
         if not (t.accepted and t.partner) then return end
-        for _, fish in ipairs(t.items) do received(t.partner, fish.item, fish.count, "trade", fish.itemID) end
+        for _, item in ipairs(t.items) do
+            if item.present then
+                Fish.PresentArrived(t.partner, item.item, item.count, "trade")
+            else
+                received(t.partner, item.item, item.count, "trade", item.itemID)
+            end
+        end
     end
 end
 
--- Mail: each mail's fish, read when the inbox updates, so that when one is taken (TakeInboxItem for one attachment,
--- AutoLootMailItem for the lot) the book knows what it was and who sent it. A mail no player sent (the Auction House) is skipped,
--- and so is one from a stranger when the client does not say, as for silver (Silver.Known).
+-- Mail: each mail's fish and presents, read when the inbox updates, so that when one is taken (TakeInboxItem for one attachment,
+-- AutoLootMailItem for the lot) the book knows what it was and who sent it. A mail no player sent (the Auction House, Greatfather
+-- Winter) is skipped, and so is one from a stranger when the client does not say, as for silver (Silver.Known).
 local inbox = {}
 local MAX_ATTACHMENTS = 16
 
@@ -272,17 +423,19 @@ local function snapshotInbox()
             for slot = 1, MAX_ATTACHMENTS do
                 local name, itemID, _, quantity = call("GetInboxItem", i, slot)
                 mail.items[slot] = fishOf(name, quantity, plain(itemID, "number") or idOf(call("GetInboxItemLink", i, slot)))
+                    or presentOf(name, quantity)
             end
             inbox[i] = mail
         end
     end
 end
 
--- Fish.Mail(sender, fish, canReply): one fish taken from a mail; exposed for the self-test.
-function Fish.Mail(sender, fish, canReply)
+-- Fish.Mail(sender, item, canReply): one fish (or present) taken from a mail; exposed for the self-test.
+function Fish.Mail(sender, item, canReply)
     if canReply == false then return end
     if canReply ~= true and not (ST.Silver and ST.Silver.Known(sender)) then return end
-    received(sender, fish.item, fish.count, "mail", fish.itemID)
+    if item.present then return Fish.PresentArrived(sender, item.item, item.count, "mail") end
+    received(sender, item.item, item.count, "mail", item.itemID)
 end
 
 local function tookItem(index, slot)
@@ -291,24 +444,31 @@ local function tookItem(index, slot)
     if not mail then return end
     local from, to = slot or 1, slot or MAX_ATTACHMENTS
     for s = from, to do
-        local fish = mail.items[s]
-        if fish then
+        local item = mail.items[s]
+        if item then
             mail.items[s] = nil -- once: the inbox is read again when it updates
-            Fish.Mail(mail.sender, fish, mail.canReply)
+            Fish.Mail(mail.sender, item, mail.canReply)
         end
     end
 end
 
 local watcher = CreateFrame("Frame")
 for _, event in ipairs({ "TRADE_SHOW", "TRADE_TARGET_ITEM_CHANGED", "TRADE_ACCEPT_UPDATE", "TRADE_CLOSED",
-    "TRADE_REQUEST_CANCEL", "MAIL_INBOX_UPDATE" }) do
+    "TRADE_REQUEST_CANCEL", "MAIL_INBOX_UPDATE", "BAG_UPDATE_DELAYED" }) do
     pcall(watcher.RegisterEvent, watcher, event)
 end
 watcher:SetScript("OnEvent", ST.Safe("the fish watcher", function(_, event, ...)
     if not (ST.db and ST.Gag and ST.Gag.IsZennit()) then return end -- only his client keeps the fish book
-    if event == "MAIL_INBOX_UPDATE" then snapshotInbox() else Fish.Trade(event, ...) end
+    if event == "MAIL_INBOX_UPDATE" then snapshotInbox()
+    elseif event == "BAG_UPDATE_DELAYED" then Fish.Opened()
+    else Fish.Trade(event, ...) end
 end))
 if hooksecurefunc then
     pcall(hooksecurefunc, "TakeInboxItem", function(index, slot) tookItem(index, slot) end)
     pcall(hooksecurefunc, "AutoLootMailItem", function(index) tookItem(index, nil) end)
+    -- opening a present: a bag item used (right-click), by whichever name this client gives the call
+    if C_Container and C_Container.UseContainerItem then
+        pcall(hooksecurefunc, C_Container, "UseContainerItem", function(bag, slot) usedItem(bag, slot) end)
+    end
+    pcall(hooksecurefunc, "UseContainerItem", function(bag, slot) usedItem(bag, slot) end)
 end

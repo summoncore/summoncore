@@ -1595,6 +1595,62 @@ add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait
             tostring(out.first), tostring(out.firstCount), tostring(out.boCod), tostring(out.afterUndo))
 end)
 
+add("wrapped fish: a present traded or mailed to Zennit is noted, and the fish that come out when he opens it go to its sender", function()
+    local z = newClient("Zennit")
+    local out, printed = {}, {}
+    local realPrint, realIsZennit, realName = ST.print, ST.Gag.IsZennit, _G.UnitName
+    ST.print = function(text) printed[#printed + 1] = text end
+    ST.Gag.IsZennit = function() return true end
+    local ok, err = pcall(with, z, function()
+        local F = ST.Fish
+        z.db.settings.zenitNames = { "Zennit" }
+        out.isPresent = F.IsPresent("Wrapped Gift") and F.IsPresent("Gaily Wrapped Present")
+        out.notPresent = F.IsPresent("Blue Wrapping Paper") or F.IsPresent("Gift Wrap") or F.IsPresent("Raw Sagefish")
+        -- Bo trades him a present (and a fish beside it: that one counts at once)
+        _G.UnitName = function() return "Bo" end
+        local realInfo, realLink = _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink
+        local slots = { { "Wrapped Gift", 1 }, { "Raw Sagefish", 1, 21071 } }
+        _G.GetTradeTargetItemInfo = function(i) local s = slots[i] if s then return s[1], nil, s[2] end end
+        _G.GetTradeTargetItemLink = function(i) local s = slots[i] if s and s[3] then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end
+        F.Trade("TRADE_SHOW")
+        F.Trade("TRADE_ACCEPT_UPDATE", 1, 1)
+        F.Trade("TRADE_CLOSED")
+        _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink = realInfo, realLink
+        out.afterTrade = select(2, F.Totals(z.db.fish))                                    -- 1: the loose fish
+        -- Cy mails him a present; the Auction House "mails" one too (not a player: not noted)
+        F.Mail("Cy", { present = true, item = "Wrapped Gift", count = 1 }, true)
+        F.Mail("Alliance Auction House", { present = true, item = "Wrapped Gift", count = 1 }, false)
+        out.noted = #z.db.presents
+        -- he opens one: the oldest is Bo's. His bags held 2 cod; they now hold 2 cod and 5 salmon
+        local before = { ["Raw Rockscale Cod"] = { count = 2, itemID = 6362 } }
+        F.Opening("Wrapped Gift", before)
+        out.nothingYet = F.Opened(before)                                                   -- the present went, nothing came yet
+        out.first = F.Opened({ ["Raw Rockscale Cod"] = { count = 2, itemID = 6362 }, ["Raw Sunscale Salmon"] = { count = 5, itemID = 13760 } })
+        out.again = F.Opened({ ["Raw Rockscale Cod"] = { count = 2, itemID = 6362 }, ["Raw Sunscale Salmon"] = { count = 9, itemID = 13760 } }) -- not counted twice
+        -- then Cy's: 3 more cod
+        F.Opening("Wrapped Gift", { ["Raw Rockscale Cod"] = { count = 2 } })
+        out.second = F.Opened({ ["Raw Rockscale Cod"] = { count = 5, itemID = 6362 } })
+        -- a present nobody was seen to send: said, not counted
+        local said = #printed
+        F.Opening("Wrapped Gift", {})
+        out.unknown = F.Opened({ ["Raw Sagefish"] = { count = 1 } })
+        out.unknownSaid = printed[#printed] and printed[#printed]:find("did not see who sent it", 1, true) ~= nil and #printed > said
+        local all = F.Totals(z.db.fish)
+        out.by = {}
+        for _, g in ipairs(all) do out.by[g.name] = g.count end
+        out.left = #z.db.presents
+    end)
+    ST.print, ST.Gag.IsZennit, _G.UnitName = realPrint, realIsZennit, realName
+    if not ok then return false, tostring(err) end
+    local by = out.by or {}
+    return out.isPresent and not out.notPresent and out.afterTrade == 1 and out.noted == 2 and out.nothingYet == 0 and out.first == 5
+        and out.again == 0 and out.second == 3 and out.unknown == 1 and out.unknownSaid and by.Bo == 6 and by.Cy == 3 and out.left == 0,
+        string.format("present %s/%s; after trade %s, noted %s; opened %s then %s, %s again, Cy's %s, unknown %s (%s); Bo %s, Cy %s; left %s",
+            tostring(out.isPresent), tostring(out.notPresent), tostring(out.afterTrade), tostring(out.noted), tostring(out.nothingYet),
+            tostring(out.first), tostring(out.again), tostring(out.second), tostring(out.unknown), tostring(out.unknownSaid),
+            tostring(by.Bo), tostring(by.Cy), tostring(out.left))
+end)
+
 add("the leaderboard: fish totals travel from Zennit's client only, the newest wins, an undo to 0 takes a giver off; summons rank by season", function()
     local z, a = newClient("Zennit"), newClient("Alpha")
     local out = {}
