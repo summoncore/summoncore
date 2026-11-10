@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.30.0, work in progress**. See [Status](#status) for what has and has
+Status: **v0.31.0, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -89,7 +89,8 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc intro [scene\|z1..z5\|g1..g5\|2a\|2z1..\|now\|check]` | Play the illustrated story, "Zennit and the Index" (32 scenes, then "The Index today", which follows the season; season two's 26 scenes come after it); a scene number starts there, a chapter key plays that chapter (`2a`, `2b`, `2z1`, `2g1`... are season two's: see [Season two](#season-two)), `now` plays only "The Index today", `check` tests the sound files |
 | `/sc titles` | Who leads each of the season's titles so far, with who is close behind: the heaviest hand, the best supporting role (assists), the lucky pair (whose bonus tipped most rolls), the prompt payer, the process server (whose writs cost him the most points), and Zennit's kind ones (the dice goblin, the hard bargain, the quick reply, and the good sport: ten summons or more that he went on in the season). The Index names them for good in the finale's keepsake. Praise in words, no points. Also the Tools tab's **The titles** |
 | `/sc tab` | The silver tab as a statement: on Zennit's client, who owes him what across every week and what has been paid; on anyone else's, what you owe him and your card's punches. Also the Tools tab's **The tab** |
-| `/sc leaders` (also `/sc leaderboard`) | **The leaderboard**, the top ten of two boards: who has summoned Zennit most (this season, which is what the race counts, then this week and in all) and who has given him the most fish (this week and in all, from the totals his client shares). The Party tab's **Leaders** section shows both in full, side by side; the Tools tab's **Leaderboard** prints them, which is how Zennit (who cannot open the Party tab) sees them. Rankings give no gag away, so his client shows them too |
+| `/sc leaders` (also `/sc leaderboard`) | **The leaderboard**, the top ten of three boards: who has summoned Zennit most (this season, which is what the race counts, then this week and in all), who has given him the most fish (this week and in all, from the totals his client shares), and who has thrown the most snowballs at him. The Party tab's **Leaders** section shows all three in full, side by side; the Tools tab's **Leaderboard** prints them, which is how Zennit (who cannot open the Party tab) sees them. Rankings give no gag away, so his client shows them too |
+| `/sc snowballs` | **Who has thrown snowballs at Zennit**, and how many (this week and in all). Only the thrower's client sees its own cast for certain, so the thrower's client counts each Snowball that lands on him (a cast at him that succeeds; one at anyone else, or one that fails, does not count) and tells everyone its totals (message `N`); his client says who hit him ("Bo threw a snowball at you!"). A throw from someone without the addon is not seen. The leaderboard's third board |
 | `/sc fish` | **The fish book**: on Zennit's client, who has given him fish and how many (this week and in all), by giver and by kind. Fish **traded** to him (counted when the trade completes) or **mailed** to him (counted as he takes them from the mail) go in by themselves; a mail no player sent (the Auction House) and, when the game does not say, one from a stranger are left out, as for silver. A fish is known by its item ID (the old world's raw and cooked fish) or a fish word in its name (cod, salmon, eel, anything ending in "fish"...), never a rod, bait or recipe. His client also has `/sc fish add <name> <count> [what]` to write one in by hand and `/sc fish undo` to take the newest out. The book stays on his client, but each giver's totals are shared with everyone (message `P`, only from his characters), so anyone's `/sc fish` lists the givers. Also the Tools tab's **Fish** |
 | `/sc cards` | Who holds a summon card and how many punches are left. `/sc card` explains cards; Zennit's own: `/sc card sell <name> [punches [silver]]` and `/sc card offer <punches> <silver>`. Also the Tools tab's **Summon cards** |
 | `/sc probe` | Listens to trade and mail events and prints what the client lets an addon see (who, how much, or a secret value), to learn how the fifty silver could be detected. Run it again to stop |
@@ -136,7 +137,8 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `Cards.lua` | Cards | Summon cards: prepaid silver Zennit sells, with punches counted from the log |
 | `Silver.lua` | Silver | The money side: on Zennit's client, sees silver arrive by trade or mail and asks him what it pays; `/sc probe` |
 | `Fish.lua` | Fish | The fish book: on Zennit's client, counts fish traded or mailed to him, by giver, and shares the totals; `/sc fish` |
-| `Leaders.lua` | Leaders | The leaderboard: summons of Zennit and fish given to him, ranked; `/sc leaders` |
+| `Snowball.lua` | Snowball | Snowballs thrown at Zennit, counted by the thrower's client and shared; `/sc snowballs` |
+| `Leaders.lua` | Leaders | The leaderboard: summons of Zennit, fish given to him and snowballs thrown at him, ranked; `/sc leaders` |
 | `Probe.lua` | Probe | What the client lets an addon read of chat and of a summons arriving: `/sc probe chat` |
 | `Ask.lua` | Ask | Questions only Zennit's client can answer (`/sc ask`): the questions, asking with a timeout, and his client's answers |
 | `Report.lua` | Report | `/sc report`: the playtest numbers, worked out from the log |
@@ -185,7 +187,7 @@ Badges, named as the Index would (the Badges tab says what each takes): Entered 
 Sync shares events, not totals, so merging is a set union and nothing is double-counted. Messages use the
 `SUMMONSYNC` prefix: `H` (hello), `E` (new event, broadcast), `R` (request, whispered), `B` (batch,
 whispered, one record each, about 3 per second). Others: `Z` (Zennit's answer), `D` and `S` (the dice),
-`T` (a summon its caster deleted), `K` (a summon card Zennit sold), `P` (one giver's fish totals, from Zennit's client only; the newest per giver wins, and a total of 0 takes them off the board), `A` (Zennit's client names the character he is playing, so others learn his
+`T` (a summon its caster deleted), `K` (a summon card Zennit sold), `N` (the sender's own snowballs thrown at Zennit, for the leaderboard; never from his characters), `P` (one giver's fish totals, from Zennit's client only; the newest per giver wins, and a total of 0 takes them off the board), `A` (Zennit's client names the character he is playing, so others learn his
 alts), `X` (a request to reset), `F` (how a player felt about a week, kept only by Zennit's and the admin's clients), `V` (a chapter shown to the group, party or raid only), `L` (a line Zennit wrote for himself: a postcard or his out-of-office, only from his characters, the newest kept) `W` (what a group member saw of a ritual, kept only by Zennit's client: see below), `Q` and `Y` (a question for Zennit's client, sent to the group and the guild, and his answer whispered back to whoever asked: `/sc ask`) and `C` (the admin started or stopped
 a season: see [The season](#the-season)). AceComm, LibSerialize and LibDeflate are not used; the addon has its own
 small encoder and send queue.
@@ -368,7 +370,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Area | State |
 |---|---|
 | Skeleton, diagnostics panel, store, tallies, scoring, badges, panel, Zennit gag | Verified in the live client (solo, with `/sc fake`) |
-| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 118 tests now; the ones added since (0.27 to 0.30) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
+| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 119 tests now; the ones added since (0.27 to 0.31) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
 | The live-client checklist (`/sc check`, `design/verification.md`) | The automatic checks passed in the live client on 2026-10-06. The checks done with a friend are still to do: they are how the rest of this table gets confirmed |
 | Real Ritual of Summoning detection | Verified in the live client (with Poogs): the detector fired and the summons synced. Not yet confirmed: when the game reports the ritual done, which decides whether helpers are seen without the prompt (run one with `/sc debug` on the caster's client). Summons by a caster without the addon are filed by Zennit's client (never run live); what a target presses on the game's own summon prompt is read by hooking `C_SummonInfo` (written, never run live); raid helpers in other subgroups are checked now but not yet tried in a raid |
 | Addon messages between two real clients | Verified: party, guild and whisper pings and replies arrive. Names show as `Name Surname` here (not `Name-Realm`), so the addon compares plain first-word names |
@@ -384,6 +386,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | 0.28.1: resets, closed weeks, the silver watcher, BattleTag hashes | Checked outside the game only (the self-test and a headless run) |
 | 0.29.0: the fish book (fish traded or mailed to Zennit) | Checked outside the game only (the self-test and a headless run); which trade and mail calls the 12.0 client lets an addon read is untested |
 | 0.30.0: the leaderboard (summons of Zennit, fish), fish totals shared by sync | Checked outside the game only (the self-test, 118/118 in a headless run) |
+| 0.31.0: snowballs thrown at Zennit, a third board on the leaderboard | Checked outside the game only (the self-test, 119/119 in a headless run); the Snowball's spell ID (21343) and the cast events it raises are untested in this client |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.

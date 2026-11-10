@@ -351,27 +351,35 @@ local function buildTally(f)
     end
 end
 
--- The leaderboard (Leaders.lua): who has summoned Zennit most on the left, who has given him the most fish on the right.
+-- The leaderboard (Leaders.lua), three boards side by side: who has summoned Zennit most, who has given him the most fish, and who
+-- has thrown the most snowballs at him.
 local function buildLeaders(f)
-    local left, right = CreateFrame("Frame", nil, f), CreateFrame("Frame", nil, f)
-    left:SetPoint("TOPLEFT")
-    left:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -4, 0)
-    right:SetPoint("TOPLEFT", f, "TOP", 4, 0)
-    right:SetPoint("BOTTOMRIGHT")
-    local summons = scrollList(left, { { "Summons of Zennit", 170 }, { "Season", 65, "RIGHT" }, { "Week", 60, "RIGHT" },
-        { "All", 60, "RIGHT" } })
-    local fish = scrollList(right, { { "Fish for Zennit", 200 }, { "Week", 70, "RIGHT" }, { "All", 80, "RIGHT" } })
+    local function third(i)
+        local p = CreateFrame("Frame", nil, f)
+        p:SetPoint("TOPLEFT", (i - 1) * 258, 0)
+        p:SetPoint("BOTTOM")
+        p:SetWidth(254)
+        return p
+    end
+    local summons = scrollList(third(1), { { "Summons", 110 }, { "Season", 50, "RIGHT" }, { "Week", 40, "RIGHT" }, { "All", 36, "RIGHT" } })
+    local fish = scrollList(third(2), { { "Fish", 130 }, { "Week", 45, "RIGHT" }, { "All", 60, "RIGHT" } })
+    local snow = scrollList(third(3), { { "Snowballs", 130 }, { "Week", 45, "RIGHT" }, { "All", 60, "RIGHT" } })
     return function()
         local rows = {}
         for i, r in ipairs(ST.Leaders.SummonRows()) do
             rows[#rows + 1] = { i .. ". " .. who(r.name), T.Paint("amber", r.season), tostring(r.week), tostring(r.all) }
         end
-        summons.Set(rows, "Nobody has summoned Zennit yet.")
+        summons.Set(rows, "No summons of Zennit yet.")
         rows = {}
         for i, r in ipairs(ST.Fish.Board()) do
             rows[#rows + 1] = { i .. ". " .. who(r.name), tostring(r.week), T.Paint("amber", r.count) }
         end
-        fish.Set(rows, "No fish yet. Trade or mail him one.")
+        fish.Set(rows, "No fish yet.")
+        rows = {}
+        for i, r in ipairs(ST.Snowball.Board()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), tostring(r.week), T.Paint("amber", r.count) }
+        end
+        snow.Set(rows, "No snowballs yet.")
     end
 end
 
@@ -747,7 +755,7 @@ local function buildTools(f)
     end)
     tool(record, "LEADERBOARD", function() -- also for Zennit, who cannot open the Party tab
         for _, line in ipairs(ST.Leaders.Lines(10)) do ST.print(line) end
-        show("The leaderboard, summons of Zennit and fish given to him, is in the chat window.")
+        show("The leaderboard, summons of Zennit, fish given to him and snowballs thrown at him, is in the chat window.")
     end)
     tool(record, "FISH", function()
         for _, line in ipairs(ST.Fish.Lines()) do ST.print(line) end

@@ -2,7 +2,7 @@ local ADDON, ST = ...
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.30.0"
+ST.version = "0.31.0"
 
 local DB_VERSION = 1
 
@@ -610,7 +610,13 @@ function commands.tab()
     for _, line in ipairs(ST.Silver.Lines()) do print_(line) end
 end
 
--- The leaderboard: summons of Zennit and fish given to him, the top ten of each (everyone, Zennit too).
+-- Who has thrown snowballs at Zennit, and how many.
+function commands.snowballs()
+    for _, line in ipairs(ST.Snowball.Lines()) do print_(line) end
+end
+commands.snowball = commands.snowballs
+
+-- The leaderboard: summons of Zennit, fish given to him and snowballs thrown at him, the top ten of each (everyone, Zennit too).
 function commands.leaders()
     for _, line in ipairs(ST.Leaders.Lines(10)) do print_(line) end
 end
@@ -741,7 +747,7 @@ end
 local HELP_SHORT = {
     "/sc - the Summon Core window: the party's tally and badges, Zennit's answers, the log, the story and the tools    /sc tour - the Index shows you round it",
     "/sc rules - the rules of the race, with this week's live numbers    /sc week - how this week and the season stand (/sc week say tells the group, /sc week copy lets you paste it)",
-    "/sc tab - what is owed in silver    /sc cards - who holds a summon card    /sc titles - who leads the season's titles    /sc leaders - who has summoned Zennit and given him fish most",
+    "/sc tab - what is owed in silver    /sc cards - who holds a summon card    /sc titles - who leads the season's titles    /sc leaders - who has summoned Zennit, given him fish and hit him with snowballs most",
     "/sc report - how the race is going (/sc report copy opens it to paste into the group chat)    /sc seasons - the record of every finished season",
     "/sc help all - every command (the rest are for setting up, testing and Zennit)    /sc tips off - stop the Monday tip",
 }
@@ -778,7 +784,8 @@ local HELP = {
     "/sc titles - who leads each of the season's titles so far (heaviest hand, best supporting role, ...)",
     "/sc tab - who owes Zennit what (on his client), or what you owe him (on everyone else's)",
     "/sc cards - who holds a summon card and how many punches are left; /sc card - how cards work (Zennit sells them)",
-    "/sc leaders - the leaderboard: who has summoned Zennit most (this week, this season, in all) and who has given him the most fish",
+    "/sc leaders - the leaderboard: who has summoned Zennit most (this week, this season, in all), given him the most fish and thrown the most snowballs at him",
+    "/sc snowballs - who has thrown snowballs at Zennit (counted by the thrower's client, so the thrower needs the addon)",
     "/sc fish - the fish book: who has traded or mailed Zennit fish, and how many (his client shares the totals)",
     { "zennit", "/sc fish add <name> <count> [what] - write fish into the book by hand    /sc fish undo - take the newest entry out" },
     { "zennit", "/sc probe - listen to trade and mail events and print what the client shows (how silver could be detected)    /sc probe chat - the same for say, yell, party and raid chat and a summons arriving (can what Zennit says be read?); /sc probe chat copy opens what it printed" },

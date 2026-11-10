@@ -1,6 +1,7 @@
--- Leaders: the leaderboard. Two boards, on every client (Zennit's too: it gives no gag away): who has summoned Zennit most (this
--- week, this season, and in all; the season is what the race counts) and who has given him the most fish (Fish.Board, shared by
--- his client). /sc leaders, the Party tab's Leaders section, and the Tools tab's Leaderboard.
+-- Leaders: the leaderboard. Three boards, on every client (Zennit's too: it gives no gag away): who has summoned Zennit most (this
+-- week, this season, and in all; the season is what the race counts), who has given him the most fish (Fish.Board, shared by his
+-- client), and who has thrown the most snowballs at him (Snowball.Board, each thrower's client says). /sc leaders, the Party tab's
+-- Leaders section, and the Tools tab's Leaderboard.
 local ADDON, ST = ...
 local Leaders = {}
 ST.Leaders = Leaders
@@ -28,7 +29,7 @@ function Leaders.SummonRows()
     return Leaders.Summons(ST.db.events, ST.Week.Start(), ST.Week.Season().since or 0, ST.Ledger.Context())
 end
 
--- Both boards as lines for the chat window: the top `n` of each (default 5).
+-- The boards as lines for the chat window: the top `n` of each (default 5).
 function Leaders.Lines(n)
     n = n or 5
     local lines = { "|cffffd100The leaderboard|r" }
@@ -45,6 +46,13 @@ function Leaders.Lines(n)
     for i = 1, math.min(n, #fish) do
         local r = fish[i]
         lines[#lines + 1] = string.format("   %d. %s: %d fish, %d this week", i, r.name, r.count, r.week)
+    end
+    local snow = ST.Snowball.Board()
+    lines[#lines + 1] = "Snowballs thrown at Zennit:"
+    if #snow == 0 then lines[#lines + 1] = "   nobody has thrown one yet." end
+    for i = 1, math.min(n, #snow) do
+        local r = snow[i]
+        lines[#lines + 1] = string.format("   %d. %s: %d snowballs, %d this week", i, r.name, r.count, r.week)
     end
     return lines
 end

@@ -1657,6 +1657,63 @@ add("the leaderboard: fish totals travel from Zennit's client only, the newest w
         tostring(out.zero), #af, table.concat((function() local t = {} for _, r in ipairs(s) do t[#t + 1] = r.name .. ":" .. r.season .. "/" .. r.week .. "/" .. r.all end return t end)(), " "))
 end)
 
+add("snowballs: a throw at Zennit is counted by the thrower's client and told to everyone; his client says who hit him", function()
+    local z, a = newClient("Zennit"), newClient("Alpha")
+    local out, printed = {}, {}
+    local realPrint, realIsZennit = ST.print, ST.Gag.IsZennit
+    ST.print = function(text) printed[#printed + 1] = text end
+    ST.Gag.IsZennit = function() return ST.Sync.myName() == "Zennit" end
+    local ok, err = pcall(function()
+        local S, Sy = ST.Snowball, ST.Sync
+        local sent = {}
+        with(a, function()
+            a.db.settings.zenitNames = { "Zennit" }
+            -- a snowball at Zennit: sent, then it lands
+            S.OnCast("UNIT_SPELLCAST_SENT", "player", "Zennit", "guid-1", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_SUCCEEDED", "player", "guid-1", S.SPELL_ID)
+            -- one at somebody else, one that failed, and another spell at Zennit: none counts
+            S.OnCast("UNIT_SPELLCAST_SENT", "player", "Bo", "guid-2", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_SUCCEEDED", "player", "guid-2", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_SENT", "player", "Zennit", "guid-3", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_FAILED", "player", "guid-3", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_SENT", "player", "Zennit", "guid-4", ST.RITUAL_ID)
+            S.OnCast("UNIT_SPELLCAST_SUCCEEDED", "player", "guid-4", ST.RITUAL_ID)
+            -- and a second one at him
+            S.OnCast("UNIT_SPELLCAST_SENT", "player", "Zennit-Realm", "guid-5", S.SPELL_ID)
+            S.OnCast("UNIT_SPELLCAST_SUCCEEDED", "player", "guid-5", S.SPELL_ID)
+            out.mine = S.Mine()
+            for _, m in ipairs(#a.out > 0 and a.out or Sy.state.queue) do
+                local body = m.payload:match("^%d+~N~(.*)$")
+                if body then sent[#sent + 1] = body end
+            end
+            out.aBoard = S.Board()
+            out.fromZennit = Sy.OnMessage("1~N~5|5|0|" .. time() .. "|1", "PARTY", "Zennit") -- he cannot hit himself
+        end)
+        local before = #printed
+        with(z, function()
+            z.db.settings.zenitNames = { "Zennit" }
+            for _, body in ipairs(sent) do out.heard = Sy.OnMessage("1~N~" .. body, "PARTY", "Alpha") end
+            out.said = #printed - before
+            out.bad = Sy.OnMessage("1~N~1|9|0|" .. time() .. "|0", "PARTY", "Bo")
+            out.older = Sy.OnMessage("1~N~1|0|0|1|0", "PARTY", "Alpha")
+            out.zBoard = S.Board()
+            out.lines = table.concat(ST.Leaders.Lines(), " ")
+        end)
+        out.sent = #sent
+    end)
+    ST.print, ST.Gag.IsZennit = realPrint, realIsZennit
+    if not ok then return false, tostring(err) end
+    local zb, ab = out.zBoard or {}, out.aBoard or {}
+    return out.mine == 2 and out.sent == 2 and #ab == 1 and ab[1].name == "Alpha" and ab[1].count == 2
+        and out.heard == "snowball" and out.said == 2 and out.fromZennit == "rejected:sender" and out.bad == "rejected:values"
+        and out.older == "kept" and #zb == 1 and zb[1].name == "Alpha" and zb[1].count == 2 and zb[1].week == 2
+        and (out.lines or ""):find("Alpha: 2 snowballs", 1, true) ~= nil,
+        string.format("mine %s, sent %s, heard %s, said %s, from Zennit %s, bad %s, older %s, his board %d (%s %s/%s)",
+            tostring(out.mine), tostring(out.sent), tostring(out.heard), tostring(out.said), tostring(out.fromZennit),
+            tostring(out.bad), tostring(out.older), #zb, tostring(zb[1] and zb[1].name), tostring(zb[1] and zb[1].count),
+            tostring(zb[1] and zb[1].week))
+end)
+
 add("a check the addon sees for itself is recorded quietly on a friend's client, and said on the admin's", function()
     local a = newClient("Alpha")
     local out, printed = {}, {}

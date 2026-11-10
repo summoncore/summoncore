@@ -17,6 +17,8 @@
 --   Y  REPLY    body: qid|key|status|value  (his client's answer, whispered back to whoever asked; only from his characters)
 --   P  FISH     body: giver|total|week|weekStart|stamp  (one giver's line of the fish book, Fish.lua: only from his characters;
 --                                           everyone keeps the newest per giver, for the leaderboard)
+--   N  SNOWBALL body: total|week|weekStart|stamp|live  (the sender's own snowballs thrown at Zennit, Snowball.lua; live: 1 when one
+--                                           was just thrown, so his client says who hit him)
 -- record = id|caster|target|assist1,assist2|mapID|subzone|time|confirmed|wrote[|answer[|w[|by]]]
 -- A record filed by Zennit's client for a caster without the addon carries "by" (his name): its id starts with it, and only he
 -- can send or delete it (design/lenses.md, Accessibility, G).
@@ -339,6 +341,7 @@ function Sync.Hello(channel, target)
     else
         for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "H", helloBody()) end
         Sync.SendFeelings() -- our own answers again, so Zennit's and the admin's clients catch up
+        Sync.SendSnowballs()  -- and our snowballs at him, for everyone's leaderboard
         if ST.IsZennitAccount() then
             Sync.SendAlt()
             Sync.SendCards()
@@ -504,6 +507,19 @@ function Sync.SendFishBoard(target)
     for i, row in ipairs(ST.Fish.Board()) do
         if i > 20 then break end
         Sync.SendFish(row.name, row.count, row.week, weekStart, target)
+    end
+end
+
+-- This client's own snowballs at Zennit (Snowball.lua). With no counts given, what its record says now (nothing if none).
+function Sync.SendSnowballs(total, week, weekStart, live, target)
+    if not ST.Snowball then return end
+    if not total then total, week, weekStart = ST.Snowball.Mine() end
+    if total < 1 and not live then return end
+    local body = string.format("%d|%d|%d|%d|%d", total, week, weekStart or 0, time(), live and 1 or 0)
+    if target then
+        enqueue("WHISPER", target, "N", body)
+    else
+        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "N", body) end
     end
 end
 
@@ -754,6 +770,7 @@ function Sync.OnMessage(text, channel, sender)
         Sync.SendTombstones(sender)
         Sync.SendCards(sender)
         Sync.SendFishBoard(sender)
+        Sync.SendSnowballs(nil, nil, nil, false, sender)
         Sync.SendMarks(sender)
         return "batch:" .. sent
 
@@ -837,6 +854,16 @@ function Sync.OnMessage(text, channel, sender)
         board[key] = { name = key, count = total, week = week, weekStart = ws, stamp = stamp } -- 0 is kept, so an older line cannot bring it back
         if ST.Hub then ST.Hub.Refresh() end
         return "fish"
+
+    elseif typ == "N" then
+        -- a player's own snowballs at Zennit: each speaks only for themselves
+        if not validName(sender) then return "bad" end
+        local total, week, ws, stamp, live = body:match("^(%d+)|(%d+)|(%d+)|(%d+)|([01])$")
+        if not total then return "bad" end
+        total, week, ws, stamp = tonumber(total), tonumber(week), tonumber(ws), tonumber(stamp)
+        if total > 100000 or week > total or stamp > time() + 86400 then return "rejected:values" end
+        if ST.Week.IsZennit(sender) then return "rejected:sender" end
+        return ST.Snowball.Heard(sender, total, week, ws, stamp, live == "1")
 
     elseif typ == "A" then
         if not validName(sender) then return "bad" end
