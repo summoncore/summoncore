@@ -721,6 +721,10 @@ local function buildTools(f)
         for _, line in ipairs(ST.Cards.Lines()) do ST.print(line) end
         show("Who holds a summon card, and the punches left, are in the chat window.")
     end)
+    tool(record, "FISH", function()
+        for _, line in ipairs(ST.Fish.Lines()) do ST.print(line) end
+        show("The fish book, who has given Zennit fish, is in the chat window.")
+    end)
     tool(record, "PAST SEASONS", function() -- a few lines for each season: they go to the chat window, which scrolls
         local seasons = ST.Ledger.Seasons()
         for _, s in ipairs(seasons) do

@@ -2,7 +2,7 @@ local ADDON, ST = ...
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.28.1"
+ST.version = "0.29.0"
 
 local DB_VERSION = 1
 
@@ -610,6 +610,27 @@ function commands.tab()
     for _, line in ipairs(ST.Silver.Lines()) do print_(line) end
 end
 
+-- The fish book: who has traded or mailed Zennit fish (kept on his client). His client can also write one in by hand
+-- (/sc fish add <name> <count> [what]) and take the newest out (/sc fish undo).
+function commands.fish(rest)
+    local verb, args = (rest or ""):match("^(%S*)%s*(.-)$")
+    verb = verb:lower()
+    if (verb == "add" or verb == "undo") and not ST.Gag.IsZennit() then
+        return print_("Only Zennit's client keeps the fish book.")
+    end
+    if verb == "add" then
+        local who, count, item = args:match("^(%S+)%s+(%d+)%s*(.-)$")
+        local entry, why = ST.Fish.Add(who, item ~= "" and item or nil, count, "hand")
+        if not entry then return print_(why or "usage: /sc fish add <name> <count> [what]") end
+        return print_(string.format("Into the fish book: %d %s from %s.", entry.count, entry.item, entry.from))
+    elseif verb == "undo" then
+        local e = ST.Fish.Undo()
+        if not e then return print_("The fish book is empty.") end
+        return print_(string.format("Taken out of the fish book: %d %s from %s.", e.count, e.item, e.from))
+    end
+    for _, line in ipairs(ST.Fish.Lines()) do print_(line) end
+end
+
 -- Prints these lines to the chat window, and with the word "copy" puts them in the copy window instead (the chat window
 -- cannot be selected). Copy is a word rather than the default because the window takes the keyboard: someone who only wants
 -- to read the rules should not have to press Escape to get back to playing (design/lenses.md, Flow).
@@ -751,6 +772,8 @@ local HELP = {
     "/sc titles - who leads each of the season's titles so far (heaviest hand, best supporting role, ...)",
     "/sc tab - who owes Zennit what (on his client), or what you owe him (on everyone else's)",
     "/sc cards - who holds a summon card and how many punches are left; /sc card - how cards work (Zennit sells them)",
+    "/sc fish - the fish book: who has traded or mailed Zennit fish, and how many (kept on his client)",
+    { "zennit", "/sc fish add <name> <count> [what] - write fish into the book by hand    /sc fish undo - take the newest entry out" },
     { "zennit", "/sc probe - listen to trade and mail events and print what the client shows (how silver could be detected)    /sc probe chat - the same for say, yell, party and raid chat and a summons arriving (can what Zennit says be read?); /sc probe chat copy opens what it printed" },
     "/sc report [copy] - what the log says about how the race is being played (for a playtest); copy opens it in a window you can copy from",
     "/sc rules [copy] - the rules of the race, with this week's live numbers; copy opens them in a window you can copy from",

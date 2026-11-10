@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.28.1, work in progress**. See [Status](#status) for what has and has
+Status: **v0.29.0, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -89,6 +89,7 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc intro [scene\|z1..z5\|g1..g5\|2a\|2z1..\|now\|check]` | Play the illustrated story, "Zennit and the Index" (32 scenes, then "The Index today", which follows the season; season two's 26 scenes come after it); a scene number starts there, a chapter key plays that chapter (`2a`, `2b`, `2z1`, `2g1`... are season two's: see [Season two](#season-two)), `now` plays only "The Index today", `check` tests the sound files |
 | `/sc titles` | Who leads each of the season's titles so far, with who is close behind: the heaviest hand, the best supporting role (assists), the lucky pair (whose bonus tipped most rolls), the prompt payer, the process server (whose writs cost him the most points), and Zennit's kind ones (the dice goblin, the hard bargain, the quick reply, and the good sport: ten summons or more that he went on in the season). The Index names them for good in the finale's keepsake. Praise in words, no points. Also the Tools tab's **The titles** |
 | `/sc tab` | The silver tab as a statement: on Zennit's client, who owes him what across every week and what has been paid; on anyone else's, what you owe him and your card's punches. Also the Tools tab's **The tab** |
+| `/sc fish` | **The fish book**: on Zennit's client, who has given him fish and how many (this week and in all), by giver and by kind. Fish **traded** to him (counted when the trade completes) or **mailed** to him (counted as he takes them from the mail) go in by themselves; a mail no player sent (the Auction House) and, when the game does not say, one from a stranger are left out, as for silver. A fish is known by its item ID (the old world's raw and cooked fish) or a fish word in its name (cod, salmon, eel, anything ending in "fish"...), never a rod, bait or recipe. His client also has `/sc fish add <name> <count> [what]` to write one in by hand and `/sc fish undo` to take the newest out. Kept on his client only, not synced; anyone else's `/sc fish` says where it is kept. Also the Tools tab's **Fish** |
 | `/sc cards` | Who holds a summon card and how many punches are left. `/sc card` explains cards; Zennit's own: `/sc card sell <name> [punches [silver]]` and `/sc card offer <punches> <silver>`. Also the Tools tab's **Summon cards** |
 | `/sc probe` | Listens to trade and mail events and prints what the client lets an addon see (who, how much, or a secret value), to learn how the fifty silver could be detected. Run it again to stop |
 | `/sc probe chat` | The same kind of probe for chat (`Probe.lua`): listens to say, yell, party and raid chat and to the events around a summons arriving, and prints whether the text and the sender are readable or secret values, how long the text is, and how long after the summons prompt each event came. Your own words are printed, other players' never (only whether they could be read). It stores and sends nothing; it is there to learn whether logging what Zennit says after he arrives is possible. Run it again to stop; `/sc probe chat copy` opens what it printed in a window to copy |
@@ -133,6 +134,7 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `Voice.lua` | Voice | Pools of lines: the Index says a fact that repeats a few different ways, never the same one twice running |
 | `Cards.lua` | Cards | Summon cards: prepaid silver Zennit sells, with punches counted from the log |
 | `Silver.lua` | Silver | The money side: on Zennit's client, sees silver arrive by trade or mail and asks him what it pays; `/sc probe` |
+| `Fish.lua` | Fish | The fish book: on Zennit's client, counts fish traded or mailed to him, by giver; `/sc fish` |
 | `Probe.lua` | Probe | What the client lets an addon read of chat and of a summons arriving: `/sc probe chat` |
 | `Ask.lua` | Ask | Questions only Zennit's client can answer (`/sc ask`): the questions, asking with a timeout, and his client's answers |
 | `Report.lua` | Report | `/sc report`: the playtest numbers, worked out from the log |
@@ -364,7 +366,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Area | State |
 |---|---|
 | Skeleton, diagnostics panel, store, tallies, scoring, badges, panel, Zennit gag | Verified in the live client (solo, with `/sc fake`) |
-| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 116 tests now; the ones added since (0.27 and 0.28) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
+| Sync merge rules and HELLO/REQUEST/BATCH exchange | Verified with simulated clients: `/sc synctest` passed 103/103 in the live client on 2026-10-06. It has 117 tests now; the ones added since (0.27 to 0.29) have only run outside the game, in a headless Lua 5.1 run with stubbed WoW calls |
 | The live-client checklist (`/sc check`, `design/verification.md`) | The automatic checks passed in the live client on 2026-10-06. The checks done with a friend are still to do: they are how the rest of this table gets confirmed |
 | Real Ritual of Summoning detection | Verified in the live client (with Poogs): the detector fired and the summons synced. Not yet confirmed: when the game reports the ritual done, which decides whether helpers are seen without the prompt (run one with `/sc debug` on the caster's client). Summons by a caster without the addon are filed by Zennit's client (never run live); what a target presses on the game's own summon prompt is read by hooking `C_SummonInfo` (written, never run live); raid helpers in other subgroups are checked now but not yet tried in a raid |
 | Addon messages between two real clients | Verified: party, guild and whisper pings and replies arrive. Names show as `Name Surname` here (not `Name-Realm`), so the addon compares plain first-word names |
@@ -378,6 +380,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | Gag and voice clips | The gag is an original drawing (`Media/gag_wag_sheet.tga`) with Zennit's recorded line and 13 recorded party lines. The voice clip categories are silent: the one take so far is in no category |
 | Release | Published on GitHub (v0.22.0, v0.25.3, v0.26.0) and, from v0.26.0, on CurseForge. Actions > Release publishes the TOC's version; a release zip carries whatever clips are committed |
 | 0.28.1: resets, closed weeks, the silver watcher, BattleTag hashes | Checked outside the game only (the self-test and a headless run) |
+| 0.29.0: the fish book (fish traded or mailed to Zennit) | Checked outside the game only (the self-test and a headless run); which trade and mail calls the 12.0 client lets an addon read is untested |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.

@@ -1546,6 +1546,55 @@ add("the silver watcher leaves mail from no player alone (the Auction House), an
             out.unsure or -1, out.player or -1, out.friend or -1)
 end)
 
+add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait, other goods and the Auction House alone", function()
+    local z = newClient("Zennit")
+    local out = {}
+    local realPrint, realIsZennit, realCall = ST.print, ST.Gag.IsZennit, _G.UnitName
+    ST.print = function() end
+    ST.Gag.IsZennit = function() return true end
+    local ok, err = pcall(with, z, function()
+        local F = ST.Fish
+        out.byId = F.IsFish("Something", 6362)
+        out.byName = F.IsFish("Raw Glossy Mightfish") and F.IsFish("Raw Rockscale Cod") and F.IsFish("Stonescale Eel")
+        out.notFish = F.IsFish("Strong Fishing Pole") or F.IsFish("Shiny Bauble") or F.IsFish("Linen Cloth")
+            or F.IsFish("Recipe: Baked Salmon") or F.IsFish("Codex of Defense")
+        z.db.events["Bo-1"] = { caster = "Bo", target = "Zennit", assistants = {}, time = BASE + 1, points = 3, kind = "zone" }
+        F.Mail("Alliance Auction House", { item = "Raw Sagefish", count = 20 }, false) -- bought, not given
+        F.Mail("Mallory", { item = "Raw Sagefish", count = 20 }, nil)                  -- the game does not say, a stranger
+        F.Mail("Bo", { item = "Raw Sagefish", count = 2 }, nil)                        -- does not say, but someone it knows
+        F.Mail("Cy", { item = "Raw Rockscale Cod", count = 5, itemID = 6362 }, true)   -- a player's mail
+        -- a trade: Bo puts up 10 cod and a cloth; both accept; it closes
+        _G.UnitName = function() return "Bo" end
+        local realInfo, realLink = _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink
+        local slots = { { "Raw Rockscale Cod", 10, 6362 }, { "Linen Cloth", 4, 2589 } }
+        _G.GetTradeTargetItemInfo = function(i) local s = slots[i] if s then return s[1], nil, s[2] end end
+        _G.GetTradeTargetItemLink = function(i) local s = slots[i] if s then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end
+        F.Trade("TRADE_SHOW")
+        F.Trade("TRADE_TARGET_ITEM_CHANGED")
+        F.Trade("TRADE_ACCEPT_UPDATE", 1, 1)
+        F.Trade("TRADE_CLOSED")
+        F.Trade("TRADE_CLOSED") -- the game sends it twice: counted once
+        -- a trade nobody accepted: nothing
+        F.Trade("TRADE_SHOW")
+        F.Trade("TRADE_TARGET_ITEM_CHANGED")
+        F.Trade("TRADE_CLOSED")
+        _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink = realInfo, realLink
+        local all, total = F.Totals(z.db.fish)
+        out.total, out.first, out.firstCount, out.entries = total, all[1] and all[1].name, all[1] and all[1].count, #z.db.fish
+        out.boCod = all[1] and all[1].items["Raw Rockscale Cod"]
+        out.lines = F.Lines()
+        F.Undo()
+        out.afterUndo = select(2, F.Totals(z.db.fish))
+    end)
+    ST.print, ST.Gag.IsZennit, _G.UnitName = realPrint, realIsZennit, realCall
+    if not ok then return false, tostring(err) end
+    return out.byId and out.byName and not out.notFish and out.total == 17 and out.entries == 3 and out.first == "Bo"
+        and out.firstCount == 12 and out.boCod == 10 and out.lines[1]:find("17 fish", 1, true) ~= nil and out.afterUndo == 7,
+        string.format("by id %s, by name %s, not fish %s; total %s in %s entries, first %s with %s (%s cod), after undo %s",
+            tostring(out.byId), tostring(out.byName), tostring(out.notFish), tostring(out.total), tostring(out.entries),
+            tostring(out.first), tostring(out.firstCount), tostring(out.boCod), tostring(out.afterUndo))
+end)
+
 add("a check the addon sees for itself is recorded quietly on a friend's client, and said on the admin's", function()
     local a = newClient("Alpha")
     local out, printed = {}, {}
