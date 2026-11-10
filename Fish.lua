@@ -1,7 +1,8 @@
 -- Fish: the other thing friends hand Zennit. Fish come to him the way silver does, by trade or by mail, and on his client only this
 -- module counts them: each fish taken from a mail or received in a completed trade goes into the fish book (ST.db.fish) with who
 -- gave it, what it was and how many. Nothing is asked and nothing in the race changes; it is a tally he can read with /sc fish
--- (also the Tools tab's Fish). It is kept on his client only, like the silver watcher, and is not shared by sync.
+-- (also the Tools tab's Fish). The book itself stays on his client; each giver's totals are shared with everyone (message P), so the
+-- leaderboard (Leaders.lua) can rank the givers on every client.
 local ADDON, ST = ...
 local Fish = {}
 ST.Fish = Fish
@@ -61,14 +62,57 @@ function Fish.Add(from, item, count, via, itemID)
     local entry = { from = from, item = item or "fish", itemID = itemID, count = math.floor(count), via = via or "hand", time = time() }
     local list = book()
     list[#list + 1] = entry
+    Fish.Share(entry.from)
     if ST.Hub then ST.Hub.Refresh() end
     return entry
 end
 
 -- Takes the newest entry out of the book; returns it, or nil when the book is empty.
 function Fish.Undo()
-    local list = book()
-    return table.remove(list)
+    local entry = table.remove(book())
+    if entry then
+        Fish.Share(entry.from)
+        if ST.Hub then ST.Hub.Refresh() end
+    end
+    return entry
+end
+
+-- Tells everyone one giver's totals now (0 takes them off the board).
+function Fish.Share(giver)
+    if not (ST.Sync and ST.Sync.SendFish) then return end
+    local weekStart = ST.Week.Start()
+    local total, week = 0, 0
+    for _, e in ipairs(book()) do
+        if e.from == giver then
+            total = total + e.count
+            if e.time >= weekStart then week = week + e.count end
+        end
+    end
+    ST.Sync.SendFish(giver, total, week, weekStart)
+end
+
+-- The givers, most fish first: { { name, count, week } }. Zennit's client reads its own book; everyone else the totals his client
+-- has shared (a week count from an earlier week is 0 now).
+function Fish.Board()
+    local rows = {}
+    local weekStart = ST.Week.Start()
+    if ST.Gag.IsZennit() then
+        local all = Fish.Totals(book())
+        local week = {}
+        for _, g in ipairs((Fish.Totals(book(), weekStart))) do week[g.name] = g.count end
+        for _, g in ipairs(all) do rows[#rows + 1] = { name = g.name, count = g.count, week = week[g.name] or 0 } end
+    else
+        for _, line in pairs(ST.db.fishBoard or {}) do
+            if line.count > 0 then
+                rows[#rows + 1] = { name = line.name, count = line.count, week = line.weekStart == weekStart and line.week or 0 }
+            end
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.name < b.name
+    end)
+    return rows
 end
 
 -- Fish from each giver, most first: { { name, count, items = { [item] = count }, last } }, and the total.
@@ -108,10 +152,21 @@ local function itemsLine(items)
     return table.concat(parts, ", ")
 end
 
--- The fish book as lines: on Zennit's client, who has given him what, this week and in all; anyone else is told where it is kept.
+-- The fish book as lines: on Zennit's client, who has given him what, this week and in all; anyone else gets the givers' totals
+-- his client has shared.
 function Fish.Lines()
     if not ST.Gag.IsZennit() then
-        return { "The Index keeps the fish book on Zennit's client: trade or mail him a fish and it is counted there." }
+        local rows = Fish.Board()
+        if #rows == 0 then
+            return { "Nobody has given Zennit a fish yet, as far as his client has told this one. Trade or mail him one: it is counted there." }
+        end
+        local lines, total = {}, 0
+        for _, r in ipairs(rows) do
+            total = total + r.count
+            lines[#lines + 1] = string.format("%s: %d fish, %d of them this week.", r.name, r.count, r.week)
+        end
+        table.insert(lines, 1, string.format("The fish book, as Zennit's client shares it: %d fish given to him.", total))
+        return lines
     end
     local list = book()
     local all, total = Fish.Totals(list)

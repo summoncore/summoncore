@@ -1595,6 +1595,68 @@ add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait
             tostring(out.first), tostring(out.firstCount), tostring(out.boCod), tostring(out.afterUndo))
 end)
 
+add("the leaderboard: fish totals travel from Zennit's client only, the newest wins, an undo to 0 takes a giver off; summons rank by season", function()
+    local z, a = newClient("Zennit"), newClient("Alpha")
+    local out = {}
+    local realPrint, realIsZennit = ST.print, ST.Gag.IsZennit
+    ST.print = function() end
+    ST.Gag.IsZennit = function() return ST.Sync.myName() == "Zennit" end
+    local ok, err = pcall(function()
+        local F, Sy = ST.Fish, ST.Sync
+        local sent = {}
+        with(z, function()
+            z.db.settings.zenitNames = { "Zennit" }
+            F.Add("Bo", "Raw Sagefish", 4, "trade")
+            F.Add("Cy", "Raw Rockscale Cod", 9, "mail")
+            F.Add("Bo", "Raw Sagefish", 2, "trade")
+            for _, m in ipairs(#z.out > 0 and z.out or Sy.state.queue) do
+                local body = m.payload:match("^%d+~P~(.*)$")
+                if body then sent[#sent + 1] = body end
+            end
+            out.zBoard = F.Board()
+        end)
+        with(a, function()
+            a.db.settings.zenitNames = { "Zennit" }
+            for _, body in ipairs(sent) do Sy.OnMessage("1~P~" .. body, "PARTY", "Zennit") end
+            out.forged = Sy.OnMessage("1~P~Mallory|999|999|0|" .. time(), "PARTY", "Mallory")
+            out.badWeek = Sy.OnMessage("1~P~Bo|1|5|0|" .. time(), "PARTY", "Zennit") -- more this week than in all
+            out.board = F.Board()
+            -- an older line about Bo is kept out; an undo to 0 takes Cy off, and an older line cannot bring Cy back
+            out.older = Sy.OnMessage("1~P~Bo|1|0|0|1", "PARTY", "Zennit")
+            out.zero = Sy.OnMessage("1~P~Cy|0|0|0|" .. (time() + 1), "PARTY", "Zennit")
+            Sy.OnMessage("1~P~Cy|9|9|0|" .. time(), "PARTY", "Zennit")
+            out.after = F.Board()
+            out.lines = table.concat(ST.Leaders.Lines(), " ")
+        end)
+        -- summons of Zennit: ranked by the season, then in all
+        local W = ST.Week
+        local ctx = ST.Ledger.Context()
+        ctx.isZennit = function(n) return n == "Zennit" end
+        local events = {}
+        local function put(id, caster, t, target) events[id] = { caster = caster, target = target or "Zennit", assistants = {}, time = t, points = 3, kind = "zone" } end
+        put("1", "Bo", 100); put("2", "Bo", 200); put("3", "Bo", 300)       -- Bo: 3, all before the season
+        put("4", "Cy", 1100); put("5", "Cy", 1200)                         -- Cy: 2, both this season
+        put("6", "Di", 2100)                                               -- Di: 1, this week
+        put("7", "Di", 2200, "Bo")                                         -- not of Zennit: not counted
+        out.summons = ST.Leaders.Summons(events, 2000, 1000, ctx)
+        out.W = W
+    end)
+    ST.print, ST.Gag.IsZennit = realPrint, realIsZennit
+    if not ok then return false, tostring(err) end
+    local s, b, af = out.summons or {}, out.board or {}, out.after or {}
+    local zb = out.zBoard or {}
+    local pass = #zb == 2 and zb[1].name == "Cy" and zb[1].count == 9 and zb[2].count == 6
+        and #b == 2 and b[1].name == "Cy" and b[1].count == 9 and b[2].name == "Bo" and b[2].count == 6 and b[2].week == 6
+        and out.forged == "rejected:sender" and out.badWeek == "rejected:values" and out.older == "kept" and out.zero == "fish"
+        and #af == 1 and af[1].name == "Bo" and (out.lines or ""):find("Bo: 6 fish", 1, true) ~= nil
+        and #s == 3 and s[1].name == "Cy" and s[1].season == 2 and s[2].name == "Di" and s[2].week == 1 and s[3].name == "Bo"
+        and s[3].season == 0 and s[3].all == 3
+    return pass, string.format("his board %d (%s %s), sent %s; theirs %d (%s %s/%s); forged %s, bad %s, older %s, zero %s, after %d; summons %s",
+        #zb, tostring(zb[1] and zb[1].name), tostring(zb[1] and zb[1].count), tostring(#(zb)), #b, tostring(b[1] and b[1].name),
+        tostring(b[2] and b[2].count), tostring(b[2] and b[2].week), tostring(out.forged), tostring(out.badWeek), tostring(out.older),
+        tostring(out.zero), #af, table.concat((function() local t = {} for _, r in ipairs(s) do t[#t + 1] = r.name .. ":" .. r.season .. "/" .. r.week .. "/" .. r.all end return t end)(), " "))
+end)
+
 add("a check the addon sees for itself is recorded quietly on a friend's client, and said on the admin's", function()
     local a = newClient("Alpha")
     local out, printed = {}, {}

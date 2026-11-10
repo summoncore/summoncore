@@ -12,8 +12,8 @@ local ROW_H = 20
 local ORDER = { "party", "zennit", "log", "story", "sync", "tools" }
 local LABELS = { party = "PARTY", zennit = "ZENNIT", log = "LOG", story = "STORY", sync = "SYNC", tools = "TOOLS" }
 -- The old tab names still open the tab that now holds them (Hub.Open("tally") shows the Party tab's Tally section).
-local TAB_OF = { summary = "party", tally = "party", badges = "party", answer = "zennit" }
-local SECTION_OF = { summary = true, tally = true, badges = true }
+local TAB_OF = { summary = "party", tally = "party", badges = "party", leaders = "party", answer = "zennit" }
+local SECTION_OF = { summary = true, tally = true, badges = true, leaders = true }
 
 local window
 local tabs = {}      -- name -> { button, frame, refresh }
@@ -348,6 +348,30 @@ local function buildTally(f)
                 T.Paint("amber", t.points) }
         end
         list.Set(out, "No summons logged yet.")
+    end
+end
+
+-- The leaderboard (Leaders.lua): who has summoned Zennit most on the left, who has given him the most fish on the right.
+local function buildLeaders(f)
+    local left, right = CreateFrame("Frame", nil, f), CreateFrame("Frame", nil, f)
+    left:SetPoint("TOPLEFT")
+    left:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -4, 0)
+    right:SetPoint("TOPLEFT", f, "TOP", 4, 0)
+    right:SetPoint("BOTTOMRIGHT")
+    local summons = scrollList(left, { { "Summons of Zennit", 170 }, { "Season", 65, "RIGHT" }, { "Week", 60, "RIGHT" },
+        { "All", 60, "RIGHT" } })
+    local fish = scrollList(right, { { "Fish for Zennit", 200 }, { "Week", 70, "RIGHT" }, { "All", 80, "RIGHT" } })
+    return function()
+        local rows = {}
+        for i, r in ipairs(ST.Leaders.SummonRows()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), T.Paint("amber", r.season), tostring(r.week), tostring(r.all) }
+        end
+        summons.Set(rows, "Nobody has summoned Zennit yet.")
+        rows = {}
+        for i, r in ipairs(ST.Fish.Board()) do
+            rows[#rows + 1] = { i .. ". " .. who(r.name), tostring(r.week), T.Paint("amber", r.count) }
+        end
+        fish.Set(rows, "No fish yet. Trade or mail him one.")
     end
 end
 
@@ -721,6 +745,10 @@ local function buildTools(f)
         for _, line in ipairs(ST.Cards.Lines()) do ST.print(line) end
         show("Who holds a summon card, and the punches left, are in the chat window.")
     end)
+    tool(record, "LEADERBOARD", function() -- also for Zennit, who cannot open the Party tab
+        for _, line in ipairs(ST.Leaders.Lines(10)) do ST.print(line) end
+        show("The leaderboard, summons of Zennit and fish given to him, is in the chat window.")
+    end)
     tool(record, "FISH", function()
         for _, line in ipairs(ST.Fish.Lines()) do ST.print(line) end
         show("The fish book, who has given Zennit fish, is in the chat window.")
@@ -985,8 +1013,9 @@ local function buildTools(f)
     end
 end
 
--- The Party tab: the party's own pages (Summary, Tally, Badges) as sections under one row of small buttons.
-local SECTIONS = { { "summary", "SUMMARY", buildSummary }, { "tally", "TALLY", buildTally }, { "badges", "BADGES", buildBadges } }
+-- The Party tab: the party's own pages (Summary, Tally, Leaders, Badges) as sections under one row of small buttons.
+local SECTIONS = { { "summary", "SUMMARY", buildSummary }, { "tally", "TALLY", buildTally }, { "leaders", "LEADERS", buildLeaders },
+    { "badges", "BADGES", buildBadges } }
 local party = {} -- party.select(name) shows one of the sections
 
 local function buildParty(f)

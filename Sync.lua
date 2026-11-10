@@ -15,6 +15,8 @@
 --                                           kept only when it is the admin's. Anyone may pass a mark on: the stamp travels with it)
 --   Q  QUESTION body: qid|key|arg           (a question only Zennit's client can answer, Ask.lua; qid starts with the asker's name)
 --   Y  REPLY    body: qid|key|status|value  (his client's answer, whispered back to whoever asked; only from his characters)
+--   P  FISH     body: giver|total|week|weekStart|stamp  (one giver's line of the fish book, Fish.lua: only from his characters;
+--                                           everyone keeps the newest per giver, for the leaderboard)
 -- record = id|caster|target|assist1,assist2|mapID|subzone|time|confirmed|wrote[|answer[|w[|by]]]
 -- A record filed by Zennit's client for a caster without the addon carries "by" (his name): its id starts with it, and only he
 -- can send or delete it (design/lenses.md, Accessibility, G).
@@ -341,6 +343,7 @@ function Sync.Hello(channel, target)
             Sync.SendAlt()
             Sync.SendCards()
             Sync.SendLines()
+            Sync.SendFishBoard()
         end
     end
 end
@@ -478,6 +481,29 @@ function Sync.SendCards(target)
             Sync.SendCard(card, target)
             sent = sent + 1
         end
+    end
+end
+
+-- One giver's line of the fish book (Fish.lua), from Zennit's client: "giver|total|week|weekStart|stamp". A total of 0 takes
+-- the giver off everyone's board (after /sc fish undo). Sent when the book changes, with his hello, and to anyone who asks.
+local MAX_FISH = 200
+function Sync.SendFish(giver, total, week, weekStart, target)
+    if not ST.Week.IsZennit(Sync.myName()) then return end
+    local body = string.format("%s|%d|%d|%d|%d", esc(giver), total, week, weekStart or 0, time())
+    if target then
+        enqueue("WHISPER", target, "P", body)
+    else
+        for _, ch in ipairs(Sync.channels()) do enqueue(ch, nil, "P", body) end
+    end
+end
+
+-- The top 20 givers of the fish book, if this client is Zennit's.
+function Sync.SendFishBoard(target)
+    if not (ST.Fish and ST.Week.IsZennit(Sync.myName())) then return end
+    local weekStart = ST.Week.Start()
+    for i, row in ipairs(ST.Fish.Board()) do
+        if i > 20 then break end
+        Sync.SendFish(row.name, row.count, row.week, weekStart, target)
     end
 end
 
@@ -727,6 +753,7 @@ function Sync.OnMessage(text, channel, sender)
         end
         Sync.SendTombstones(sender)
         Sync.SendCards(sender)
+        Sync.SendFishBoard(sender)
         Sync.SendMarks(sender)
         return "batch:" .. sent
 
@@ -790,6 +817,26 @@ function Sync.OnMessage(text, channel, sender)
         ST.db.cards[cid] = { id = cid, holder = holder, punches = punches, silver = silver, time = ct }
         if Sync.onCard then Sync.onCard(ST.db.cards[cid]) end
         return "card"
+
+    elseif typ == "P" then
+        -- a line of the fish book: only his characters keep one
+        if not ST.Week.IsZennit(sender) then return "rejected:sender" end
+        local giver, total, week, ws, stamp = body:match("^([^|]+)|(%d+)|(%d+)|(%d+)|(%d+)$")
+        if not giver then return "bad" end
+        giver, total, week, ws, stamp = unesc(giver), tonumber(total), tonumber(week), tonumber(ws), tonumber(stamp)
+        if not validName(giver) or total > 1000000 or week > total or stamp > time() + 86400 then return "rejected:values" end
+        ST.db.fishBoard = ST.db.fishBoard or {}
+        local board, key = ST.db.fishBoard, ST.baseName(giver) or giver
+        local old = board[key]
+        if old and old.stamp > stamp then return "kept" end
+        if not old then
+            local count = 0
+            for _ in pairs(board) do count = count + 1 end
+            if count >= MAX_FISH then return "rejected:full" end
+        end
+        board[key] = { name = key, count = total, week = week, weekStart = ws, stamp = stamp } -- 0 is kept, so an older line cannot bring it back
+        if ST.Hub then ST.Hub.Refresh() end
+        return "fish"
 
     elseif typ == "A" then
         if not validName(sender) then return "bad" end
