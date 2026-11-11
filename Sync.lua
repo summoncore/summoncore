@@ -859,6 +859,7 @@ local function announceSoon()
         if st.added > 0 then
             ST.print(string.format("Sync: received %d new summon%s.", st.added, st.added == 1 and "" or "s"))
             ST.Guard("the week check after sync", ST.Week.Recheck) -- a late summons can change a week already announced
+            ST.Guard("the achievements after sync", ST.Achieve.Announce) -- summons I was the target of, or helped with
             if ST.Hub then ST.Hub.Refresh() end
             st.added = 0
         end
@@ -1116,6 +1117,7 @@ function Sync.OnMessage(text, channel, sender)
             if count >= MAX_FISH then return "rejected:full" end
         end
         board[key] = { name = key, count = total, week = week, weekStart = ws, stamp = stamp } -- 0 is kept, so an older line cannot bring it back
+        if key == ST.baseName(Sync.myName()) then ST.Achieve.Soon() end -- my own fish: it may have earned me an achievement
         if ST.Hub then ST.Hub.Refresh() end
         return "fish"
 

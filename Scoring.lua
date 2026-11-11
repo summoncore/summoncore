@@ -1,4 +1,4 @@
--- Scoring: zone value table, points and badge rules. Placeholder values to argue about.
+-- Scoring: zone value table and points. Placeholder values to argue about. (The achievements are in Achieve.lua.)
 local ADDON, ST = ...
 setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Scoring = {}
@@ -98,79 +98,4 @@ function Scoring.Places(nameOf)
         or string.format("%d map%s above did not match the client: fix the ID in Scoring.lua. ", wrong, wrong == 1 and "" or "s") ..
             "Dungeon entrances cannot be looked up: stand at one and run /sc where."
     return out
-end
-
--- Badges: threshold rules over the summons the player cast. stats comes from Store.Stats.
-Scoring.badges = {
-    -- name: how the Index would put it (design/voice.md); how: what it takes, said plainly. The ids are what is saved.
-    { id = "first-summon", name = "Entered in the Index", how = "cast a summons",
-        test = function(s) return s.cast >= 1 end },
-    { id = "summons-10", name = "Filed in Triplicate", how = "cast ten summons that land",
-        test = function(s) return s.cast >= 10 end },
-    { id = "summons-50", name = "A Volume of Their Own", how = "cast fifty summons that land",
-        test = function(s) return s.cast >= 50 end },
-    { id = "dungeon-1", name = "Admitted Below Stairs", how = "summon someone to a dungeon entrance",
-        test = function(s) return (s.kinds.dungeon or 0) >= 1 end },
-    { id = "far-flung-1", name = "Beyond the Index's Jurisdiction", how = "summon someone to a far-flung place",
-        test = function(s) return (s.kinds.remote or 0) >= 1 end },
-    { id = "variety-5", name = "Stamped in Five Places", how = "summon to five different places",
-        test = function(s) return s.distinctMaps >= 5 end },
-    -- spread across the season rather than front-loaded (design/lenses.md, Reward); for the people who cast
-    { id = "regular", name = "Known to the Clerk", how = "summon Zennit in four different weeks",
-        test = function(s) return (s.extra.weekCount or 0) >= 4 end },
-    { id = "well-supported", name = "Countersigned by Witnesses", how = "have your helpers tip a roll of yours",
-        test = function(s) return (s.extra.tipped or 0) >= 1 end },
-    { id = "clean-slate", name = "Paid in Full, No Receipt", how = "pay what you owe Zennit",
-        test = function(s) return (s.extra.paid or 0) > 0 and (s.extra.owed or 0) == 0 end },
-    { id = "card-sharp", name = "Stamped to the Last Punch", how = "use up a summon card",
-        test = function(s) return (s.cardsUsedUp or 0) >= 1 end },
-}
-
--- After an answer or a payment changes what the log says about me: award and say any badge that has just been earned.
-function Scoring.Announce()
-    if ST.Gag and ST.Gag.IsZennit() then return end -- his tally and badges are hidden
-    for _, name in ipairs(Scoring.EvaluateBadges()) do ST.print("|cffffd100Badge earned:|r " .. name) end
-end
-
--- What a character qualifies for (stats as Store.Stats gives them, plus the ledger's figures and the cards it used up).
-local function statsOf(name)
-    local stats = ST.Store.Stats(name)
-    stats.extra = ST.Ledger and ST.Ledger.CasterStats(name) or {}
-    stats.cardsUsedUp = ST.Cards and ST.Cards.Exhausted(name) or 0
-    return stats
-end
-
--- Adds to `got` every badge `name` now meets and does not hold yet. Returns their names.
-local function award(name, got)
-    local stats, earned = statsOf(name), {}
-    for _, b in ipairs(Scoring.badges) do
-        if not got[b.id] and b.test(stats) then
-            got[b.id] = { earned = time() }
-            earned[#earned + 1] = b.name
-        end
-    end
-    return earned
-end
-
--- The badges a character holds (default: the one being played), as { id = { earned } }. Badges are earned per character
--- (Store.Stats counts what that character cast), but the saved variables are the account's, so they are kept per character
--- in db.badgesBy. A character with no entry yet (each one, the first time this version runs) takes the badges it already
--- qualifies for, quietly: nothing is announced twice, and nobody loses a badge they earned. The old account-wide db.badges is
--- left where it is, unused.
-function Scoring.Badges(name)
-    name = name or ST.Sync.myName()
-    ST.db.badgesBy = ST.db.badgesBy or {}
-    local got = ST.db.badgesBy[name]
-    if not got then
-        got = {}
-        ST.db.badgesBy[name] = got
-        award(name, got)
-    end
-    return got
-end
-
--- Awards any newly met badges to the character being played. Returns a list of the badge names earned just now.
-function Scoring.EvaluateBadges()
-    local me = ST.Sync.myName()
-    return award(me, Scoring.Badges(me))
 end

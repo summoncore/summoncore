@@ -309,7 +309,10 @@ local function go(i)
     end
     outline(Tour.Spot(s))
     counter:SetText(string.format("TOUR.EXE  %d/%d", at, #steps))
-    if at == #steps then ST.db.settings.tourSeen = true end
+    if at == #steps and not ST.db.settings.tourSeen then
+        ST.db.settings.tourSeen = true
+        ST.Achieve.Soon()
+    end
     stopVoice()
     if playing and not muted() then
         local ok, willPlay, h = pcall(PlaySoundFile, MEDIA .. s.line .. ".ogg", "Dialog")

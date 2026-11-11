@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.30.0, work in progress**. See [Status](#status) for what has and has
+Status: **v0.32.0, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -61,7 +61,7 @@ three-line welcome to this effect (`/sc welcome` says it again).
 
 | Command | What it does |
 |---|---|
-| `/sc` (also `/summoncore`) | Open the Summon Core window: Party (Summary, Tally, Leaders and Badges), Zennit (his answers), Log, Story, Sync and Tools tabs; the Party tab is closed to Zennit (he gets the "ah ah ah" gag) and Zennit's tab to the party (a gag of its own; the admin can open both); Story is a talent tree: the intro on top, then one trunk for Zennit and one for the group, a chapter per weekly win, with the next win pulsing, the reached chapters lit (click to play) and the rest hidden until the weekly race reaches them (everything below is in it too) |
+| `/sc` (also `/summoncore`) | Open the Summon Core window: Party (Summary, Tally, Leaders and Achievements), Zennit (his answers), Log, Story, Sync and Tools tabs; the Party tab is closed to Zennit (he gets the "ah ah ah" gag) and Zennit's tab to the party (a gag of its own; the admin can open both); Story is a talent tree: the intro on top, then one trunk for Zennit and one for the group, a chapter per weekly win, with the next win pulsing, the reached chapters lit (click to play) and the rest hidden until the weekly race reaches them (everything below is in it too) |
 | `/sc help` | Five lines: the commands a player needs (the window, rules, week, tab, cards, titles, report, seasons). `/sc help all` lists every command |
 | `/sc errors [clear]` | The problems the addon caught in itself this session. Every slash command, event handler, login step and hub tab runs under a guard: a bug no longer fails silently (WoW shows nothing by default) or stops the steps after it; it is said once in chat, kept here, and still passed to the game's own error handler. Tell Aaron what it says |
 | `/sc tips [on\|off]` | The one-line tip about a command, said once a Monday at login (they go round in order; two are for Zennit's client only). `/sc tips off` stops it |
@@ -69,16 +69,16 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `/sc panel` | Open the window on the Party tab |
 | `/sc log [n]` | Recent summons |
 | `/sc tally` | Cast, received and assisted counts and points per player, ranked by summons of him this season, then points. The Party tab's Tally is the same list, with an "Of Zennit" column |
-| `/sc badges` | Badge list (badges are kept per character: an alt earns its own) |
+| `/sc achievements [all]` (also `/sc ach`, `/sc badges`) | **Your achievements**: how many are earned, the newest five, and the five you are nearest to, each with its progress (`7/10`). `all` lists every one, group by group. The Party tab's **Achievements** section is the same list in full. They are kept per character (an alt earns its own) and hidden on Zennit's client, as his tally is |
 | `/sc writ` | Arm a writ for your next ritual on Zennit (two a week): if he declines that summons in the game, it costs him its points. Again to withdraw it. It is also a **key binding** (Esc > Options > Key Bindings > AddOns > Summon Core: "Play a writ on your next summons of Zennit"), so it is one key in the middle of play; the binding (`Bindings.xml`) has never been tried in the client |
 | `/sc week copy` | Opens the same "Week:" line `/sc week say` would send, in the copy window, to paste where you choose (nothing is sent). It says why not under the old rules |
 | `/sc week say` | Tell the group (party or raid chat) where the week stands, in one line: the lead, his dice left, the last call. It uses `C_ChatInfo.SendChatMessage` (the global `SendChatMessage` is only a deprecation fallback on this client, kept as a last resort), which has never been tried under the 12.0 chat rules |
 | `/sc check` | Admin only. The live-client checklist (`design/verification.md`), also the Tools tab's Checks section (RUN AUTO, NEXT, PASS, FAIL, SKIP, TRACE, REPORT, COPY: the output box cannot be selected, so COPY opens its text in a window that can): `/sc check auto` runs the automatic checks, `/sc check <id>` gives the steps for the rest, `pass`/`fail`/`skip <id> [note]` records a result, `trace` shows what the summon prompt did, `report` opens a copyable report to send back. Some checks turn green on their own when they happen for real |
 | `/sc where` | Current map ID, subzone and how it scores |
 | `/sc places` | What a place is worth (a city 1, a zone 3, a dungeon entrance 5, a far-flung place 10) and every map ID in the table, checked against the game's own name for it; a wrong or missing one is flagged. The ritual briefing on Zennit also says what the place you stand in is worth |
-| `/sc undo` | Remove the newest summon your client logged: usually the newest you cast, and on Zennit's client also one his client filed for a caster without the addon (earned badges are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
+| `/sc undo` | Remove the newest summon your client logged: usually the newest you cast, and on Zennit's client also one his client filed for a caster without the addon (earned achievements are kept). Nobody can undo someone else's, and the deletion is shared so sync does not bring it back |
 | `/sc admin` | Admin only. What the game reports as this account's BattleTag, and whether it is the admin's or Zennit's |
-| `/sc reset [all]` | Wipe this client's summons, badges and story (it asks first). `all` is admin only: it asks everyone else to do the same |
+| `/sc reset [all]` | Wipe this client's summons, achievements and story (it asks first; achievements for what a reset does not wipe, the fish, the snowballs and the story watched, are kept). `all` is admin only: it asks everyone else to do the same |
 | `/sc season [start\|stop]` | Whether a season is running. `start` and `stop` are admin only (each asks first): `stop` ends the season in progress now, with no finale; `start` begins a new one, 0 to 0, from this week. Everyone's client hears of it, now or at its next hello. Also Tools > General > **The season** |
 | `/sc asplayer` | Admin's account only: see the addon as a player does (admin tools, help lines and spoilers hidden), and back. Also Tools > General > **View as player** |
 | `/sc export`, `/sc import` | Import / Export window (copy-paste strings of the summon log) |
@@ -128,7 +128,8 @@ three-line welcome to this effect (`/sc welcome` says it again).
 | `Prompt.lua` | Prompt | Asks you to confirm the two assistants when detection is unclear |
 | `Store.lua` | Store | The only code that touches `SummonTrackerDB`; tallies are derived from the event log |
 | `Sync.lua` | Sync | The only code that touches the network |
-| `Scoring.lua` | Scoring | Zone value table, points, badge rules |
+| `Scoring.lua` | Scoring | Zone value table, points |
+| `Achieve.lua` | Achieve | The achievements: one figure for everything counted about a character, the list of rules, earning and showing them; `/sc achievements` |
 | `Theme.lua` | Theme | The "Neon Index" look: windows, buttons, tabs, text boxes and scroll areas, all drawn from flat colours |
 | `Respond.lua` | Respond | Zennit's answer to a summon of him (accept, decline, ask for silver, dice) |
 | `Week.lua` | Week | The weekly contest, his week off, and the season; all derived from the log |
@@ -186,7 +187,7 @@ Placeholder values, meant to be argued about. Edit the tables at the top of `Sco
 A dungeon entrance sits inside an ordinary outdoor map, so it is matched by subzone. Stand at the spot and
 run `/sc where` to read the exact string. Points go to the caster only.
 
-Badges, named as the Index would (the Badges tab says what each takes): Entered in the Index (a first summons), Filed in Triplicate (ten), A Volume of Their Own (fifty), Admitted Below Stairs (a dungeon entrance), Beyond the Index's Jurisdiction (a far-flung place), Stamped in Five Places (five different maps), and four that come later and come from the log: Known to the Clerk (summoned him in four different weeks), Countersigned by Witnesses (helpers tipped a roll of yours), Paid in Full, No Receipt (your tab is clear) and Stamped to the Last Punch (used up a card). They are for the people who cast; helpers get titles, not badges. Each character earns and keeps its own.
+**Achievements** (`Achieve.lua`; they began as the ten badges, whose ids and earned dates are kept). There are 46, one or more for everything the Index counts about a character, each a count against a goal, so one not earned yet shows how far along it is. Named as the Index would; the Achievements section says plainly what each takes. **Casting:** summons cast (1, 10, 50, 100) and points (50, 250). **Summoned and helping:** times summoned (1, 10, 25) and summons helped with (1, 10, 50). **Places:** dungeon entrances (1, 10), far-flung places (1, 5), cities (10), different places (5, 15), and Zennit's postcards (the first to get him to a far-flung place: 1, 3). **The race for Zennit:** summons of him (1, 10, 50), different weeks (4, 10), weeks the group won that you summoned him in (1, 5), a season the group won, a roll your helpers tipped, rolls you tipped as a helper (1, 5), a writ that cost him, a summons on his week off. **Silver and cards:** a clear tab, 200 silver paid, a card used up. **Fish and snowballs:** fish given to him (1, 20, 100, from the totals his client shares) and snowballs that hit him (1, 25, 100, this character's own count). **The story:** the intro watched through, the tour taken, the weekly question answered. One is announced in chat ("Achievement earned: ...") when a summons is logged, an answer or a sync batch arrives, a fish total or a snowball lands, or the story ends. Each character earns and keeps its own. When the list grows, a character takes the new ones it already qualifies for without a word (at login), so an update never prints a page of them. Helpers have them too now (they had only titles before: see the 2026-11-11 row of the decision log in `design/lenses.md`). The tour's recorded line still says "badges".
 
 ### Sync
 
@@ -264,6 +265,8 @@ up new files). The art lives in `Media/intro_l<n>.blp` (lines) and `intro_<n>.bl
 **Rebuilding the pieces** (needs ffmpeg for the audio, Edge or Chrome for the art):
 
 - `tools/intro/render_intro.ps1 [-Style lines|storybook] [-SceneList 1,2]`: the picture sheets (`intro_l<n>.blp` for lines, `intro_<n>.blp` for storybook).
+- `tools/intro/render_intro.py [--style lines|storybook] [--scenes 1,2]`: the same sheets without Windows (Playwright's Chromium, numpy and Pillow; `render_shots.js` takes the stills). It reads the page patch and styles out of the `.ps1`, and both read `tools/intro/lines.css`, so they cannot drift apart.
+- **The neon look** (`lines`) is lettered and coloured after the picture entries of an old television guide to the galaxy: a colour for each subject (Zennit pink, the Index's book, form and clerk green, the Ritual a red ring round a dark disc with a bright yellow face, the Auditor orange, the hall a quiet blue, the party yellow), thick glowing tube lines, and labels in bold capitals. The colours are in `tools/intro/lines.css`. **It is also built up, not just shown** (`Intro.BuildUp`): each scene is drawn on from the top in steps as it opens, a part the narrator has yet to mention stays dark until just before it is and is then drawn on too (from the highlight boxes in `IntroCues.lua`; a part mentioned in the first moments or bigger than two fifths of the picture is not held back), and the highlight box flickers on like a tube before it holds. The storybook look is shown as before.
 - `tools/intro/build_audio.ps1`: reads the narration takes in `tools/intro/narration/`, synthesises the music bed
   and the beeps, chirps and key clicks (`Media/sfx/`), mixes `Media/intro_<n>.ogg` (voice plus music, which ducks
   under the voice and swells in the pauses) and `Media/intro_<n>_voice.ogg` (voice only), and writes
@@ -404,6 +407,8 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | 0.28.1: resets, closed weeks, the silver watcher, BattleTag hashes | Checked outside the game only (the self-test and a headless run) |
 | 0.29.0: the review of counting and sync (sync fingerprints and week-by-week requests, Zennit's characters shared, each summons filed once, the race fixes, undo, cards, resets, per-character badges) | Checked outside the game only (the self-test, 145/145, and simulated clients). A friend on 0.28 still syncs the old way, but no longer teaches a 0.29 client Zennit's alts until his own client is on 0.29 |
 | 0.30.0: the fish book (fish traded or mailed to Zennit, loose or wrapped in a present he opens), the leaderboard (summons of Zennit, fish, snowballs), snowballs thrown at Zennit | Checked outside the game only (the self-test and a headless run); which trade, mail and bag calls the 12.0 client lets an addon read, the present's item names, and the Snowball's spell ID (21343) are untested in this client |
+| 0.31.0: the achievements (46, with progress, from everything counted), snowballs kept per character, fish that arrive while a present is being opened no longer counted twice | Checked outside the game only (luacheck, the self-test and a headless run); the Party tab's Achievements section has not been seen in the client (check `s-fit`) |
+| 0.32.0: the intro's neon look redrawn (a colour for each subject, glowing lines, capital labels; all 58 sheets) and built up as it plays | Checked outside the game only: the sheets were written by the new `render_intro.py` (same size and header as before, and they decode), and the build-up by the self-test; neither has been seen in the client |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.

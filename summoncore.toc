@@ -32,6 +32,7 @@ Silver.lua
 Fish.lua
 Snowball.lua
 Leaders.lua
+Achieve.lua
 Probe.lua
 Reset.lua
 Hub.lua

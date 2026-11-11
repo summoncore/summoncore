@@ -1,4 +1,4 @@
--- Hub: one window for everything the slash commands do. Tabs: Party (Summary, Tally and Badges), Zennit (his answers),
+-- Hub: one window for everything the slash commands do. Tabs: Party (Summary, Tally, Leaders and Achievements), Zennit (his answers),
 -- Log, Story, Sync, Tools. The slash commands still work; /sc with no arguments opens this window. Each of the first
 -- two tabs is closed to the other side: Zennit gets the "ah ah ah" gag on the Party tab, and the party gets a gag of
 -- its own on his. Drawn in the Neon Index look (Theme.lua):
@@ -13,8 +13,8 @@ local ROW_H = 20
 local ORDER = { "party", "zennit", "log", "story", "sync", "tools" }
 local LABELS = { party = "PARTY", zennit = "ZENNIT", log = "LOG", story = "STORY", sync = "SYNC", tools = "TOOLS" }
 -- The old tab names still open the tab that now holds them (Hub.Open("tally") shows the Party tab's Tally section).
-local TAB_OF = { summary = "party", tally = "party", badges = "party", leaders = "party", answer = "zennit" }
-local SECTION_OF = { summary = true, tally = true, badges = true, leaders = true }
+local TAB_OF = { summary = "party", tally = "party", achievements = "party", badges = "party", leaders = "party", answer = "zennit" }
+local SECTION_OF = { summary = true, tally = true, achievements = true, leaders = true }
 
 local window
 local tabs = {}      -- name -> { button, frame, refresh }
@@ -168,13 +168,24 @@ local function buildSummary(f)
                 T.Paint("amber", t.received), T.Paint("amber", t.assisted), T.Paint("amber", t.points)),
             whereText(),
             "",
-            T.Paint("dim", "BADGES.SYS"),
         }
-        for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.Scoring.Badges()[b.id]
-            lines[#lines + 1] = got and ("[X] " .. b.name .. "  " .. T.Paint("dim", fmtTime(got.earned, "%Y-%m-%d")))
-                or T.Paint("dim", "[ ] " .. b.name)
+        -- the achievements: how many, and the newest few (the Achievements section has them all)
+        local achieved, earned = ST.Achieve.Rows()
+        local have = {}
+        for i, r in ipairs(achieved) do
+            r.order = i
+            if r.got then have[#have + 1] = r end
         end
+        table.sort(have, function(a, b)
+            if a.got.earned ~= b.got.earned then return a.got.earned > b.got.earned end
+            return a.order > b.order
+        end)
+        lines[#lines + 1] = T.Paint("dim", "ACHIEVE.SYS") .. string.format("  %s of %d earned", T.Paint("amber", earned), #achieved)
+        if #have == 0 then lines[#lines + 1] = T.Paint("dim", "none yet: cast a summons, or help with one") end
+        for i = 1, math.min(4, #have) do
+            lines[#lines + 1] = "[X] " .. have[i].def.name .. "  " .. T.Paint("dim", fmtTime(have[i].got.earned, "%Y-%m-%d"))
+        end
+        if #have > 4 then lines[#lines + 1] = T.Paint("dim", string.format("    and %d more, under ACHIEVEMENTS", #have - 4)) end
         lines[#lines + 1] = ""
         lines[#lines + 1] = T.Paint("dim", "RECENT.LOG")
         local recent = ST.Store.Recent(6)
@@ -408,15 +419,28 @@ local function buildLeaders(f)
     end
 end
 
-local function buildBadges(f)
-    local list = scrollList(f, { { "Badge", 270 }, { "Status", 90 }, { "Earned, or what it takes", 380 } })
+-- Every achievement, group by group: the earned ones with their date, the rest with how far along they are and what it takes.
+local function buildAchievements(f)
+    local list = scrollList(f, { { "Achievement", 300 }, { "Progress", 90 }, { "Earned, or what it takes", 350 } })
     return function()
+        local all, earned = ST.Achieve.Rows()
         local rows = {}
-        for _, b in ipairs(ST.Scoring.badges) do
-            local got = ST.Scoring.Badges()[b.id]
-            rows[#rows + 1] = { got and ("[X] " .. b.name) or T.Paint("dim", "[ ] " .. b.name),
-                got and "EARNED" or T.Paint("dim", "LOCKED"), got and T.Paint("dim", fmtTime(got.earned)) or T.Paint("dim", b.how or "") }
+        for _, g in ipairs(ST.Achieve.groups) do
+            local have, n = 0, 0
+            for _, r in ipairs(all) do
+                if r.def.group == g[1] then have, n = have + (r.got and 1 or 0), n + 1 end
+            end
+            rows[#rows + 1] = { T.Paint("amber", g[2]:upper()), T.Paint("amber", have .. "/" .. n), "" }
+            for _, r in ipairs(all) do
+                if r.def.group == g[1] then
+                    local got = r.got
+                    rows[#rows + 1] = { got and ("[X] " .. r.def.name) or T.Paint("dim", "[ ] " .. r.def.name),
+                        got and "EARNED" or T.Paint("dim", r.value .. "/" .. r.goal),
+                        got and T.Paint("dim", fmtTime(got.earned)) or T.Paint("dim", r.def.how) }
+                end
+            end
         end
+        rows[#rows + 1] = { T.Paint("dim", string.format("%d of %d earned", earned, #all)), "", "" }
         list.Set(rows)
     end
 end
@@ -942,7 +966,7 @@ local function buildTools(f)
         function(v) ST.db.settings.soundOn = v end)
     tool(data, "UNDO LAST SUMMON", function()
         local last = ST.Store.RemoveLast()
-        show(last and string.format("Removed %s -> %s (badges already earned are kept).", last.ev.caster, last.ev.target) or
+        show(last and string.format("Removed %s -> %s (achievements already earned are kept).", last.ev.caster, last.ev.target) or
             "Nothing to undo.")
         Hub.Refresh()
     end)
@@ -1167,9 +1191,9 @@ local function buildTools(f)
     end
 end
 
--- The Party tab: the party's own pages (Summary, Tally, Leaders, Badges) as sections under one row of small buttons.
+-- The Party tab: the party's own pages (Summary, Tally, Leaders, Achievements) as sections under one row of small buttons.
 local SECTIONS = { { "summary", "SUMMARY", buildSummary }, { "tally", "TALLY", buildTally }, { "leaders", "LEADERS", buildLeaders },
-    { "badges", "BADGES", buildBadges } }
+    { "achievements", "ACHIEVEMENTS", buildAchievements, 170 } }
 local party = {} -- party.select(name) shows one of the sections
 
 local function buildParty(f)
@@ -1186,7 +1210,7 @@ local function buildParty(f)
         sub:SetPoint("TOPLEFT", 0, -34)
         sub:SetPoint("BOTTOMRIGHT")
         sections[s[1]] = { frame = sub, refresh = s[3](sub) }
-        buttons[s[1]] = button(f, s[2], 4 + (i - 1) * 126, -4, 120, function() party.select(s[1]) end, "tab")
+        buttons[s[1]] = button(f, s[2], 4 + (i - 1) * 126, -4, s[4] or 120, function() party.select(s[1]) end, "tab")
     end
     party.select("summary")
     party.buttons = buttons
@@ -1342,7 +1366,7 @@ function Hub.Refresh()
 end
 
 -- Opens the window on a tab (default: the last one used, or the player's own: Party, or Zennit's for Zennit). The old
--- names summary, tally and badges open the Party tab on that section, and answer opens Zennit's.
+-- names summary, tally, achievements (or badges) open the Party tab on that section, and answer opens Zennit's.
 function Hub.Open(name)
     if not window then build() end
     local tab = TAB_OF[name] or name
@@ -1352,6 +1376,7 @@ function Hub.Open(name)
     if gagged(tab) then -- the other side's tab: the gag, then this player's own tab instead
         tab = zenit and "zennit" or "party"
     end
+    if name == "badges" then name = "achievements" end -- what the section was called
     if SECTION_OF[name] then party.select(name) end
     if not window:IsShown() then window:Show() end
     selectTab(tab)

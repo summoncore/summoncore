@@ -489,6 +489,23 @@ add("tour: every step has a line and a recording, every outline finds its part o
     return #bad == 0, #bad == 0 and string.format("%d steps for the party, %d for Zennit", #party, #zennit) or table.concat(bad, "; ")
 end)
 
+add("intro build-up: the picture is drawn on in steps, a part stays dark until it is about to be mentioned, a big or early one never", function()
+    local I = ST.Intro
+    local list = { { t = 0.6, x = 0, y = 0, w = 100, h = 100 }, { t = 10, x = 200, y = 0, w = 100, h = 100 },
+        { t = 14, x = 200, y = 0, w = 100, h = 100 }, { t = 12, x = 0, y = 0, w = 900, h = 500 } }
+    local w0, p0 = I.BuildUp(list, 0)
+    local w1, p1 = I.BuildUp(list, 0.45)
+    local w2, p2 = I.BuildUp(list, 5)
+    local _, p3 = I.BuildUp(list, 9.7)
+    local _, p4 = I.BuildUp(list, 9.95)
+    local wNone, pNone = I.BuildUp(nil, 3)
+    local good = w0 == 1 and #p0 == 1 and p0[1].hidden == 1 and w1 == 0.5 and w2 == 0 and #p2 == 1 and p2[1].x == 200
+        and p3[1].hidden > 0 and p3[1].hidden < 1 and #p4 == 0 and wNone == 0 and #pNone == 0
+        and I.Flash(0) == 1 and I.Flash(0.1) == 0.25 and I.Flash(2) == 0.8
+    return good, string.format("opens %s dark with %d part, half-way %s, later %s with %d; part %s then %d left; no boxes %s/%d",
+        tostring(w0), #p0, tostring(w1), tostring(w2), #p2, tostring(p3[1] and p3[1].hidden), #p4, tostring(wNone), #pNone)
+end)
+
 add("intro highlights: a box is up while its subject is mentioned, and the generated boxes fit the picture", function()
     local I = ST.Intro
     local list = { { t = 1, x = 0, y = 0, w = 10, h = 10 }, { t = 6, x = 5, y = 5, w = 10, h = 10 } }
@@ -4203,16 +4220,16 @@ add("badges are kept per character: an alt has none of its main's, and a charact
     local a = newClient("Alpha")
     local first, alt, again
     with(a, function()
-        ST.Scoring.Badges() -- what logging in does (initDB)
+        ST.Achieve.Badges() -- what logging in does (initDB)
         first = select(3, Store.Add({ caster = "Alpha", target = "Bo", assistants = {}, time = BASE + 970, confirmed = true }, true))
     end)
     local altClient = { name = "Alphalt", out = {}, state = Sync.newState(), db = a.db } -- the same account's saved variables
-    with(altClient, function() alt = ST.Scoring.Badges() end)
+    with(altClient, function() alt = ST.Achieve.Badges() end)
     -- a character with badges saved account-wide by an earlier version, and no entry of its own yet
     local m = newClient("Mia")
     m.db.badges = { ["first-summon"] = { earned = BASE } }
     m.db.events["Mia-" .. (BASE + 971)] = { caster = "Mia", target = "Bo", assistants = {}, time = BASE + 971, confirmed = true }
-    local kept, announced = with(m, function() return ST.Scoring.Badges()["first-summon"], ST.Scoring.EvaluateBadges() end)
+    local kept, announced = with(m, function() return ST.Achieve.Badges()["first-summon"], ST.Achieve.Evaluate() end)
     -- a reset clears them, and the next summons announces its badge again
     with(a, function()
         ST.Reset.Apply(BASE + 980)
@@ -4222,6 +4239,53 @@ add("badges are kept per character: an alt has none of its main's, and a charact
         and #announced == 0 and again[1] == "Entered in the Index"
     return good, string.format("first summons: %s; the alt holds %s; old badge kept %s, announced %d; after a reset: %s",
         tostring(first[1]), tostring(next(alt)), tostring(kept ~= nil), #announced, tostring(again and again[1]))
+end)
+
+add("achievements: one for each thing counted, with its progress; a longer list is taken up without a word", function()
+    local a = newClient("Alpha")
+    local A, out = ST.Achieve, {}
+    local ids = {}
+    out.unique = true
+    for _, def in ipairs(A.list) do
+        if ids[def.id] or type(def.goal) ~= "number" or not def.name or not def.how then out.unique = false end
+        ids[def.id] = true
+    end
+    with(a, function()
+        A.Badges() -- what logging in does
+        -- summoned once and a helper once, in records another client cast: nothing is said until something asks
+        a.db.events["Beta-" .. (BASE + 1)] = { caster = "Beta", target = "Alpha", assistants = { "H1" }, mapID = 1436,
+            time = BASE + 1, confirmed = true }
+        a.db.events["Beta-" .. (BASE + 2)] = { caster = "Beta", target = "Bo", assistants = { "Alpha" }, mapID = 1436,
+            time = BASE + 2, confirmed = true }
+        out.heard = table.concat(A.Evaluate(), ", ")
+        -- his client says Alpha has given him 20 fish; Alpha throws a snowball at nobody's expense
+        a.db.fishBoard = { Alpha = { name = "Alpha", count = 20, week = 0, weekStart = 0, stamp = 1 } }
+        a.db.snowballs = { thrown = { Alpha = { BASE }, Alphalt = { BASE, BASE } }, board = {} }
+        out.gifts = table.concat(A.Evaluate(), ", ")
+        out.again = #A.Evaluate()
+        local rows, earned = A.Rows()
+        out.earned, out.total = earned, #rows
+        for _, r in ipairs(rows) do
+            if r.def.id == "fish-100" then out.fish = r.value .. "/" .. r.goal end
+            if r.def.id == "snow-25" then out.snow = r.value .. "/" .. r.goal end
+        end
+        out.lines, out.all = #A.Lines(), #A.Lines(true)
+        -- a character whose achievements were worked out under a shorter list: the new ones are its own, quietly
+        a.db.badgesBy.Alpha, a.db.badgesRules.Alpha = { ["received-1"] = { earned = BASE } }, 1
+        out.quiet = #A.Evaluate()
+        out.kept = a.db.badgesBy.Alpha["fish-20"] ~= nil and a.db.badgesBy.Alpha["received-1"].earned == BASE
+        -- a reset wipes the log's, and keeps what it does not wipe (the fish, the snowballs) without saying them again
+        ST.Reset.Apply(BASE + 50)
+        out.afterReset = (a.db.badgesBy.Alpha["received-1"] == nil and a.db.badgesBy.Alpha["fish-1"] ~= nil) and #A.Evaluate() or -1
+    end)
+    local good = out.unique and out.heard == "Delivered, Signed For, A Hand on the Portal"
+        and out.gifts == "Something Fishy on File, Fishmonger to the Index, A Cold Case" and out.again == 0 and out.earned == 5
+        and out.total == #A.list and out.fish == "20/100" and out.snow == "1/25" and out.lines > 3 and out.all > out.total
+        and out.quiet == 0 and out.kept and out.afterReset == 0
+    return good, string.format("unique %s; heard: %s; gifts: %s; again %s; %s of %s; fish %s, snow %s; lines %s/%s; quiet %s, kept %s; after a reset %s",
+        tostring(out.unique), tostring(out.heard), tostring(out.gifts), tostring(out.again), tostring(out.earned), tostring(out.total),
+        tostring(out.fish), tostring(out.snow), tostring(out.lines), tostring(out.all), tostring(out.quiet), tostring(out.kept),
+        tostring(out.afterReset))
 end)
 
 add("a reset keeps the tombstones of summons made after its mark, so a deleted summons stays deleted", function()

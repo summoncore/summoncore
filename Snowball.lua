@@ -36,10 +36,19 @@ local function store()
     return s
 end
 
--- This client's own throws at Zennit: total, and this week.
+-- The throws of the character being played (their times). The saved variables are the account's, so they are kept per
+-- character: an alt's throws are its own. A list kept by an earlier version, for the whole account, goes to this character.
+local function mine()
+    local s, me = store(), base(ST.Sync.myName())
+    if s.thrown[1] ~= nil then s.thrown = { [me] = s.thrown } end
+    s.thrown[me] = s.thrown[me] or {}
+    return s.thrown[me]
+end
+
+-- This character's own throws at Zennit: total, and this week.
 function Snowball.Mine()
     local weekStart, week = ST.Week.Start(), 0
-    local thrown = store().thrown
+    local thrown = mine()
     for _, t in ipairs(thrown) do
         if t >= weekStart then week = week + 1 end
     end
@@ -51,12 +60,13 @@ function Snowball.Thrown(target, at)
     target = plain(target)
     if not target or not ST.Week.IsZennit(target) then return false end
     if ST.Week.IsZennit(ST.Sync.myName()) then return false end -- one of his characters at another: no
-    local thrown = store().thrown
+    local thrown = mine()
     thrown[#thrown + 1] = at or time()
     while #thrown > 5000 do table.remove(thrown, 1) end
     local total, week, weekStart = Snowball.Mine()
     ST.Sync.SendSnowballs(total, week, weekStart, true)
     ST.print(string.format("Snowball! The Index has you down for %d at Zennit this week, %d in all.", week, total))
+    ST.Achieve.Announce()
     if ST.Hub then ST.Hub.Refresh() end
     return true
 end

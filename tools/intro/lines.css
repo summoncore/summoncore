@@ -1,0 +1,41 @@
+html.shot.line:root #stage{filter:none}
+/* neon tubes: thicker, round, each subject its own colour, with a bloom */
+html.shot.line:root :is(path,rect,circle,ellipse,polygon,polyline,line){stroke:#ffe14a!important;stroke-width:3.2px!important;stroke-linecap:round!important;stroke-linejoin:round!important}
+html.shot.line:root #stage>g, html.shot.line:root #stage>*{filter:drop-shadow(0 0 3px rgba(255,225,74,.55))}
+/* Zennit: pink */
+html.shot.line:root .sym-zenit :is(path,rect,circle,ellipse,polygon,polyline,line){stroke:#ff6fd8!important;stroke-width:3px!important}
+html.shot.line:root .sym-zenit :is(path,rect,circle,ellipse,polygon):not([fill="none"]){fill:#000!important}
+html.shot.line:root .sym-zenit :is([fill="#2F2D38"],[fill="#4A4A5E"],[fill="#2B2140"],[fill="#5B3FA0"],[fill="#7A52C7"]){fill:#7a1466!important}
+html.shot.line:root .sym-zenit{filter:drop-shadow(0 0 4px rgba(255,111,216,.7))}
+/* the Index: its book, its form, its clerk are green */
+html.shot.line:root :is(.sym-book,.sym-form,.sym-clerkFront,.sym-clerkBack) :is(path,rect,circle,ellipse,polygon,polyline,line){stroke:#4dff88!important;stroke-width:3px!important}
+html.shot.line:root :is(.sym-book,.sym-form,.sym-clerkFront,.sym-clerkBack) :is(path,rect,circle,ellipse,polygon):not([fill="none"]){fill:#000!important}
+html.shot.line:root :is(.sym-book,.sym-form,.sym-clerkFront,.sym-clerkBack) :is([fill="#2F2D38"],[fill="#4A4A5E"],[fill="#2B2140"],[fill="#5B3FA0"],[fill="#7A52C7"]){fill:#0d5a2a!important}
+html.shot.line:root :is(.sym-book,.sym-form,.sym-clerkFront,.sym-clerkBack){filter:drop-shadow(0 0 4px rgba(77,255,136,.65))}
+/* the Ritual: a red ring round a dark disc, so its bright yellow face reads at a glance */
+html.shot.line:root .sym-ritual{filter:drop-shadow(0 0 5px rgba(255,74,61,.75))}
+html.shot.line:root .sym-ritual :is(path,circle,ellipse){stroke:#ffe14a!important;stroke-width:4px!important}
+html.shot.line:root .sym-ritual circle[fill="#2B2140"]{fill:#170202!important;stroke:#ff4a3d!important;stroke-width:6px!important}
+html.shot.line:root .sym-ritual circle[stroke-dasharray]{stroke:#c22a1e!important;stroke-width:2.2px!important}
+html.shot.line:root .sym-ritual ellipse[fill="#FFFFFF"]{fill:#000!important}
+html.shot.line:root .sym-ritual circle[r="12"]{fill:#ffe14a!important}
+html.shot.line:root .sym-ritual circle[r="4"]{fill:#000!important;stroke:none!important}
+html.shot.line:root .sym-ritual ellipse[fill="#FF9FB8"]{stroke:#ff6fd8!important;stroke-width:2px!important}
+html.shot.line:root .sym-ritual path{stroke-width:5px!important}
+/* the Auditor and the poogs */
+html.shot.line:root .sym-auditor :is(path,rect,circle,ellipse,polygon,polyline,line){stroke:#ff9a2e!important}
+html.shot.line:root .sym-auditor{filter:drop-shadow(0 0 4px rgba(255,154,46,.7))}
+html.shot.line:root .sym-poogs :is(path,rect,circle,ellipse,polygon,polyline,line){stroke:#b78cff!important}
+html.shot.line:root .sym-poogs{filter:drop-shadow(0 0 4px rgba(183,140,255,.7))}
+/* the hall stays a quiet blue behind everything */
+html.shot.line:root .sym-hall :is(path,polygon,rect,circle,line){stroke:#2b3fa8!important;stroke-width:1.4px!important}
+html.shot.line:root .sym-hall{filter:none}
+/* what stands inside a ritual circle */
+html.shot.line:root .feature :is(path,circle,ellipse,rect,polygon){fill:#000!important;stroke:#ffe14a!important;stroke-width:3px!important}
+/* labels: capitals, blocky, as the Guide letters them */
+html.shot.line:root text{fill:#4dff88!important;font-family:"Liberation Sans","Arial",sans-serif!important;font-weight:700!important;text-transform:uppercase}
+html.shot.line:root text[fill][fill][fill][fill][fill][fill]{fill:#4dff88!important}
+
+html.shot.line:root pattern path{stroke:#1f2f86!important;stroke-width:1.2px!important}
+html.shot.line:root [fill="url(#spines)"]{stroke:#2b3fa8!important}
+html.shot.line:root .feature *{opacity:1!important}

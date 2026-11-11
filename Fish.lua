@@ -185,9 +185,20 @@ end
 
 -- Fish have arrived on Zennit's client: into the book, and one line in chat.
 -- `text`: what to say in place of "Bo sent you 3 Raw Sagefish by trade." (a present says it was opened).
+local opening -- { present, before, at } while a present he opened has not yet given up its fish
+
 local function received(from, item, count, via, itemID, text)
     local entry = Fish.Add(from, item, count, via, itemID)
     if not entry then return end
+    -- fish that come by trade or mail while a present is being opened are not the present's: they were in the bags "before"
+    if opening and via ~= "present" then
+        local b = opening.before[entry.item]
+        if not b then
+            b = { count = 0, itemID = itemID }
+            opening.before[entry.item] = b
+        end
+        b.count = b.count + entry.count
+    end
     local mine = 0
     for _, e in ipairs(book()) do
         if e.from == entry.from then mine = mine + e.count end
@@ -310,7 +321,6 @@ function Fish.BagFish()
 end
 
 local OPEN_WINDOW = 60
-local opening -- { present, before, at } while a present he opened has not yet given up its fish
 
 -- He has opened the present `item` in his bags: which of the noted presents it is (the oldest of that name, else the oldest), and
 -- the fish in his bags just before.
