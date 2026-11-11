@@ -10,7 +10,7 @@ setfenv(1, ST.env)
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.32.1"
+ST.version = "0.32.2"
 
 local DB_VERSION = 1
 
@@ -461,6 +461,15 @@ function commands.sync()
     ST.Sync.Status()
 end
 
+-- /sc wire [on|off]: every message to and from other clients, in plain words in chat (Sync.Tap). Off at each login.
+function commands.wire(rest)
+    local want -- nil: the other way round
+    if rest == "on" then want = true elseif rest == "off" then want = false end
+    local on = ST.Sync.ToggleWire(want)
+    print_(on and "wire on: every Summon Core message sent (>>) and received (<<) is shown here. /sc wire again turns it off."
+        or "wire off")
+end
+
 function commands.export()
     ST.Export.Open("export")
 end
@@ -777,6 +786,7 @@ local HELP = {
     "/sc where - current map, subzone and how it scores    /sc places - what every place is worth, checked against the game",
     { "admin", "/sc fake <target> [h1 h2] - add a test summon    /sc fakeprompt <target> <members...>" },
     "/sc sync - say hello to party/guild and show sync status",
+    "/sc wire - watch the messages Summon Core clients send each other, in plain words (again: off)",
     { "admin", "/sc synctest - run the merge self-test" },
     "/sc export / /sc import - copy-paste strings of the summon log",
     "/sc intro [scene] - play the illustrated intro (/sc intro check tests its sound files; /sc intro g2 group shows a chapter to the group; /sc intro previously plays this season's chapters back to back)    /sc welcome - the newcomer's welcome again",

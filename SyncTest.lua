@@ -4263,6 +4263,36 @@ add("a tombstone a peer sends is stamped with the wall clock, as the caster's ow
     local good = b.db.events[id] == nil and mine and theirs and math.abs(theirs - time()) <= 5 and math.abs(mine - time()) <= 5
     return good, string.format("caster's %s, peer's %s, now %d", tostring(mine), tostring(theirs), time())
 end)
+
+add("the wire (/sc wire) says each message in plain words, and is quiet when off or for our own echo", function()
+    local a = newClient("Alpha")
+    local printed, out, realPrint, realWire = {}, {}, ST.print, Sync.wire
+    ST.print = function(text) printed[#printed + 1] = text end
+    local ok, err = pcall(function()
+        local rec = "1~E~" .. Sync.Encode("Alpha-" .. BASE, { caster = "Alpha", target = "Zennit", assistants = { "Cy", "Di" },
+            mapID = 1436, subzone = "Sentinel Hill", time = BASE, wrote = BASE, confirmed = true })
+        Sync.wire = false
+        Sync.Tap("out", "PARTY", nil, rec, true)
+        Sync.wire = true
+        Sync.Tap("out", "PARTY", nil, rec, true)
+        Sync.Tap("in", "PARTY", "Alpha", rec, "ignored:self")                 -- our own broadcast coming back: not said
+        Sync.Tap("in", "WHISPER", "Bo-Realm", "1~R~" .. BASE, "asked")
+        Sync.Tap("out", "WHISPER", "Bo", "1~H~3|" .. BASE .. "|0.32.1|0|0|0||0badf00d", false)
+        Sync.Tap("in", "GUILD", "Cy", "9~Z~whatever", "ignored:version")      -- a kind it does not know: shown as it came
+        Sync.wire = false
+        with(a, function() Sync.Hello("WHISPER", "Bo") Sync.Pump(1) end)       -- a real hello, as it goes out
+        out.describedHello = Sync.Describe(a.out[1] and a.out[1].payload or "")
+    end)
+    ST.print, Sync.wire = realPrint, realWire
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local all = table.concat(printed, "\n")
+    local good = #printed == 4 and printed[1]:find(">> PARTY", 1, true) and printed[1]:find("new summons: Alpha summoned Zennit (helpers: Cy, Di)", 1, true)
+        and printed[2]:find("<< Bo-Realm via whisper", 1, true) and printed[2]:find("request: send me everything after", 1, true)
+        and printed[2]:find("[asked]", 1, true) and printed[3]:find("whisper to Bo", 1, true) and printed[3]:find("game refused it", 1, true)
+        and printed[3]:find("hello: 3 summons", 1, true) and printed[4]:find("Z whatever (protocol 9)", 1, true)
+        and out.describedHello:find("^H hello: ") ~= nil
+    return good and true or false, string.format("%d lines: %s | %s", #printed, all:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):sub(1, 300), tostring(out.describedHello))
+end)
 -- ===== [end tests:LOG] =====
 
 

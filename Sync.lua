@@ -396,7 +396,9 @@ function Sync.Pump(max)
     st.bulk = st.bulk or {}
     while n < max and (#st.queue > 0 or #st.bulk > 0) do
         local m = table.remove(#st.queue > 0 and st.queue or st.bulk, 1)
-        Sync.transport(m.channel, m.target, m.payload)
+        local ok, result = Sync.transport(m.channel, m.target, m.payload)
+        -- the game refuses with an error, false, or (newer clients) an Enum.SendAddonMessageResult other than 0, Success
+        Sync.Tap("out", m.channel, m.target, m.payload, not (ok == false or result == false or (type(result) == "number" and result ~= 0)))
         n = n + 1
     end
     return n
@@ -1257,6 +1259,85 @@ end
 ----------------------------------------------------------------------
 -- Wiring
 ----------------------------------------------------------------------
+----------------------------------------------------------------------
+-- The wire (/sc wire): every message this client sends or receives, said in chat in plain words as it goes. Off at login; it
+-- is for watching how clients talk to each other, and it can be busy (a newcomer's catch-up is hundreds of B messages).
+----------------------------------------------------------------------
+Sync.wire = false
+
+local function when(t)
+    t = tonumber(t)
+    return (t and t > 0) and date("%d %b %H:%M", t) or "never"
+end
+
+local function names(list)
+    list = unesc(list or "")
+    return list ~= "" and list:gsub(",", ", ") or "nobody"
+end
+
+local function record(f)
+    local answer = f[10] and f[10] ~= "" and (", answered " .. unesc(f[10]):match("^[^,;:]*")) or ""
+    return string.format("%s summoned %s (helpers: %s) at %s%s", unesc(f[2] or "?"), unesc(f[3] or "?"), names(f[4]),
+        when(f[7]), answer)
+end
+
+-- What each kind of message says, from its fields (the list at the top of this file).
+local DESCRIBE = {
+    H = function(f) return string.format("hello: %s summons, latest %s, version %s%s", f[1] or "?", when(f[2]), unesc(f[3] or "?"),
+        f[8] and (", digest " .. f[8]) or "") end,
+    E = function(f) return "new summons: " .. record(f) end,
+    B = function(f) return "catch-up record: " .. record(f) end,
+    R = function(f)
+        if not f[2] then return "request: send me everything after " .. when(f[1]) end
+        return string.format("request: my weeks from %s to %s differ, send those", when(f[1]), when(f[2]))
+    end,
+    N = function(f) return string.format("catch-up done: %s sent%s", f[1] or "?", f[2] == "1" and " (cut short, ask again for older)" or "") end,
+    G = function(f) return "Zennit's characters: " .. names(f[2]) end,
+    L = function(f) return string.format("Zennit's line %s: %s", unesc(f[1] or "?"), unesc(f[3] or "")) end,
+    F = function(f) return string.format("feeling about week %s (%s): %s of 3", when(f[1]), f[2] == "z" and "as Zennit" or "as the group", f[3] or "?") end,
+    V = function(f) return "showing the group story chapter " .. unesc(f[1] or "?") end,
+    W = function(f) return string.format("witness: %s summoning %s, helpers %s, at %s", unesc(f[1] or "?"), unesc(f[2] or "?"),
+        names(f[3]), when(f[6])) end,
+    C = function(f) return string.format("season %s at %s", unesc(f[1] or "?"), when(f[2])) end,
+    Q = function(f) return string.format("question %s for Zennit's client: %s %s", unesc(f[1] or "?"), unesc(f[2] or "?"), unesc(f[3] or "")) end,
+    Y = function(f) return string.format("reply to %s: %s is %s %s", unesc(f[1] or "?"), unesc(f[2] or "?"), unesc(f[3] or "?"), unesc(f[4] or "")) end,
+    P = function(f) return string.format("fish book: %s gave %s (this week %s)", unesc(f[1] or "?"), f[2] or "?", f[3] or "?") end,
+    O = function(f) return string.format("snowballs: %s at Zennit (this week %s)%s", f[1] or "?", f[2] or "?", f[5] == "1" and ", one just thrown" or "") end,
+}
+
+-- One message in plain words: "H hello: 42 summons, latest 10 Nov 21:14, ...". Anything it does not know is shown as it came.
+function Sync.Describe(payload)
+    local proto, typ, body = tostring(payload):match("^(%d+)~(%a)~(.*)$")
+    if not proto then return "not a Summon Core message: " .. tostring(payload) end
+    local fn = DESCRIBE[typ]
+    local ok, text = false, nil
+    if fn then ok, text = pcall(fn, split(body, "|")) end
+    if not ok or not text then text = body end
+    return typ .. " " .. text .. (tonumber(proto) ~= PROTO and (" (protocol " .. proto .. ")") or "")
+end
+
+-- Says one message on the wire. dir "out": `who` is the target of a whisper (nil for a group or guild message), `outcome` true
+-- or false for whether the game took it. dir "in": `who` is the sender, `outcome` what this client did with it (Sync.OnMessage:
+-- "kept", "asked", "rejected:sender"...). Our own group and guild messages come back to us too; those are not said twice.
+function Sync.Tap(dir, channel, who, payload, outcome)
+    if not Sync.wire or (dir == "in" and outcome == "ignored:self") then return end
+    local where = channel == "WHISPER" and (dir == "out" and ("whisper to " .. tostring(who)) or "whisper") or tostring(channel)
+    local line
+    if dir == "out" then
+        line = string.format("|cff66ccff>> %s|r %s%s", where, Sync.Describe(payload), outcome == false and " |cffff4444(the game refused it)|r" or "")
+    else
+        local note = (type(outcome) == "string" and outcome ~= "") and (" |cff888888[" .. outcome .. "]|r") or ""
+        line = string.format("|cff99ff99<< %s via %s|r %s%s", ST.safe(who), where, Sync.Describe(payload), note)
+    end
+    ST.print("|cff888888[wire]|r " .. line)
+end
+
+function Sync.ToggleWire(on)
+    if on == nil then on = not Sync.wire end
+    Sync.wire = on and true or false
+    return Sync.wire
+end
+
 function Sync.Status()
     local st = Sync.state
     ST.print(string.format("Sync: %d summons, latest %s, %d queued, channels: %s", ST.Store.Count(),
@@ -1283,6 +1364,9 @@ frame:SetScript("OnEvent", ST.Safe("sync", function(_, event, ...)
         grouped = now
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, text, channel, sender = ...
-        if prefix == PREFIX then Sync.OnMessage(text, channel, sender) end
+        if prefix == PREFIX then
+            local outcome = Sync.OnMessage(text, channel, sender)
+            Sync.Tap("in", channel, sender, text, outcome)
+        end
     end
 end))
