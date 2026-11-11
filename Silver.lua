@@ -3,6 +3,7 @@
 -- he sells) and ASKS him before it touches anything. /sc probe listens to the same events and prints what the client lets an
 -- addon see (who, how much, or a secret value), to learn what is real if detection does not fire.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Silver = {}
 ST.Silver = Silver
 
@@ -30,7 +31,7 @@ end
 
 -- One call of a client function, as "name = value" or why it failed.
 local function try(name, ...)
-    local fn = _G[name]
+    local fn = ST.env[name]
     if type(fn) ~= "function" then return name .. ": not there" end
     local results = { pcall(fn, ...) }
     if not results[1] then return name .. ": error " .. tostring(results[2]) end
@@ -44,17 +45,17 @@ local function onEvent(_, event, ...)
         local who = UnitName and UnitName("NPC")
         say(string.format("%s%s (args: %s)", event, who and (" with " .. shown(who)) or "", shown((...))))
         local function money(name)
-            local fn = _G[name]
+            local fn = ST.env[name]
             return type(fn) == "function" and select(2, pcall(fn)) or nil
         end
         local target, player = money("GetTargetTradeMoney"), money("GetPlayerTradeMoney")
         say("   they offer " .. coin(target) .. ", you offer " .. coin(player))
     elseif event == "MAIL_INBOX_UPDATE" then
-        local ok, count = pcall(function() return _G["GetInboxNumItems"]() end)
+        local ok, count = pcall(function() return ST.env["GetInboxNumItems"]() end)
         say("MAIL_INBOX_UPDATE: " .. (ok and (shown(count) .. " in the inbox") or ("GetInboxNumItems failed: " .. tostring(count))))
         if ok and type(count) == "number" and not secret(count) then
             for i = 1, math.min(count, 10) do
-                local info = { pcall(_G["GetInboxHeaderInfo"], i) }
+                local info = { pcall(ST.env["GetInboxHeaderInfo"], i) }
                 if info[1] then
                     -- classic order: packageIcon, stationeryIcon, sender, subject, money, CODAmount, daysLeft, hasItem, ...
                     say(string.format("   #%d from %s, %s, money %s", i, shown(info[4]), shown(info[5]), coin(info[6])))
@@ -265,7 +266,7 @@ local function known(v)
 end
 
 local function call(name, ...)
-    local fn = _G[name]
+    local fn = ST.env[name]
     if type(fn) ~= "function" then return nil end
     local results = { pcall(fn, ...) }
     if not results[1] then return nil end

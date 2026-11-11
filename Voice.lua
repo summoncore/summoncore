@@ -3,6 +3,7 @@
 -- Every variant of a pool carries the same facts, so which one a client shows is only flavour: nothing is synced.
 -- The first variant is the plain one; the self-tests set `fixed` so they always get it.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Voice = { fixed = false }
 ST.Voice = Voice
 

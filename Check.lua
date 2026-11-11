@@ -3,6 +3,7 @@
 -- Results are kept in SummonTrackerDB (ST.db.checks) so they survive a reload, and /sc check report prints them to paste.
 -- The plan around it is design/verification.md.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Check = {}
 ST.Check = Check
 

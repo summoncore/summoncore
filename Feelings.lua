@@ -2,6 +2,7 @@
 -- week, after the week's own lines; three buttons, or close it to skip. Zennit is asked his own question. Answers go to Zennit's and
 -- the admin's clients only (Sync, message F), and `/sc feelings` there shows counts, never who said what. `/sc feelings off` stops it.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Feelings = {}
 ST.Feelings = Feelings
 local T = ST.Theme

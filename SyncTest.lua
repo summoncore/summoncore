@@ -1,6 +1,11 @@
 -- /sc synctest: exercises Sync encoding, merge rules and the HELLO/REQUEST/BATCH exchange with
 -- fake events and simulated clients. Real data is never touched: each client gets a scratch DB.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
+
+-- A stand-in for one of the game's globals, or nil to take it away again. Stand-ins go in the addon's own globals (ST.env),
+-- never in _G or a Blizzard table such as C_Timer: a write there taints the game's own code until the next /reload.
+local function stub(name, fn) rawset(ST.env, name, fn) end
 local Sync, Store = ST.Sync, ST.Store
 local T = {}
 ST.SyncTest = T
@@ -1600,7 +1605,7 @@ end)
 add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait, other goods and the Auction House alone", function()
     local z = newClient("Zennit")
     local out = {}
-    local realPrint, realIsZennit, realCall = ST.print, ST.Gag.IsZennit, _G.UnitName
+    local realPrint, realIsZennit = ST.print, ST.Gag.IsZennit
     ST.print = function() end
     ST.Gag.IsZennit = function() return true end
     local ok, err = pcall(with, z, function()
@@ -1615,11 +1620,10 @@ add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait
         F.Mail("Bo", { item = "Raw Sagefish", count = 2 }, nil)                        -- does not say, but someone it knows
         F.Mail("Cy", { item = "Raw Rockscale Cod", count = 5, itemID = 6362 }, true)   -- a player's mail
         -- a trade: Bo puts up 10 cod and a cloth; both accept; it closes
-        _G.UnitName = function() return "Bo" end
-        local realInfo, realLink = _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink
+        stub("UnitName", function() return "Bo" end)
         local slots = { { "Raw Rockscale Cod", 10, 6362 }, { "Linen Cloth", 4, 2589 } }
-        _G.GetTradeTargetItemInfo = function(i) local s = slots[i] if s then return s[1], nil, s[2] end end
-        _G.GetTradeTargetItemLink = function(i) local s = slots[i] if s then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end
+        stub("GetTradeTargetItemInfo", function(i) local s = slots[i] if s then return s[1], nil, s[2] end end)
+        stub("GetTradeTargetItemLink", function(i) local s = slots[i] if s then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end)
         F.Trade("TRADE_SHOW")
         F.Trade("TRADE_TARGET_ITEM_CHANGED")
         F.Trade("TRADE_ACCEPT_UPDATE", 1, 1)
@@ -1629,7 +1633,7 @@ add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait
         F.Trade("TRADE_SHOW")
         F.Trade("TRADE_TARGET_ITEM_CHANGED")
         F.Trade("TRADE_CLOSED")
-        _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink = realInfo, realLink
+        stub("GetTradeTargetItemInfo", nil) stub("GetTradeTargetItemLink", nil)
         local all, total = F.Totals(z.db.fish)
         out.total, out.first, out.firstCount, out.entries = total, all[1] and all[1].name, all[1] and all[1].count, #z.db.fish
         out.boCod = all[1] and all[1].items["Raw Rockscale Cod"]
@@ -1637,7 +1641,8 @@ add("the fish book counts fish traded or mailed to Zennit, and leaves rods, bait
         F.Undo()
         out.afterUndo = select(2, F.Totals(z.db.fish))
     end)
-    ST.print, ST.Gag.IsZennit, _G.UnitName = realPrint, realIsZennit, realCall
+    ST.print, ST.Gag.IsZennit = realPrint, realIsZennit
+    stub("UnitName", nil)
     if not ok then return false, tostring(err) end
     return out.byId and out.byName and not out.notFish and out.total == 17 and out.entries == 3 and out.first == "Bo"
         and out.firstCount == 12 and out.boCod == 10 and out.lines[1]:find("17 fish", 1, true) ~= nil and out.afterUndo == 7,
@@ -1649,7 +1654,7 @@ end)
 add("wrapped fish: a present traded or mailed to Zennit is noted, and the fish that come out when he opens it go to its sender", function()
     local z = newClient("Zennit")
     local out, printed = {}, {}
-    local realPrint, realIsZennit, realName = ST.print, ST.Gag.IsZennit, _G.UnitName
+    local realPrint, realIsZennit = ST.print, ST.Gag.IsZennit
     ST.print = function(text) printed[#printed + 1] = text end
     ST.Gag.IsZennit = function() return true end
     local ok, err = pcall(with, z, function()
@@ -1658,15 +1663,14 @@ add("wrapped fish: a present traded or mailed to Zennit is noted, and the fish t
         out.isPresent = F.IsPresent("Wrapped Gift") and F.IsPresent("Gaily Wrapped Present")
         out.notPresent = F.IsPresent("Blue Wrapping Paper") or F.IsPresent("Gift Wrap") or F.IsPresent("Raw Sagefish")
         -- Bo trades him a present (and a fish beside it: that one counts at once)
-        _G.UnitName = function() return "Bo" end
-        local realInfo, realLink = _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink
+        stub("UnitName", function() return "Bo" end)
         local slots = { { "Wrapped Gift", 1 }, { "Raw Sagefish", 1, 21071 } }
-        _G.GetTradeTargetItemInfo = function(i) local s = slots[i] if s then return s[1], nil, s[2] end end
-        _G.GetTradeTargetItemLink = function(i) local s = slots[i] if s and s[3] then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end
+        stub("GetTradeTargetItemInfo", function(i) local s = slots[i] if s then return s[1], nil, s[2] end end)
+        stub("GetTradeTargetItemLink", function(i) local s = slots[i] if s and s[3] then return "|Hitem:" .. s[3] .. "::|h[x]|h" end end)
         F.Trade("TRADE_SHOW")
         F.Trade("TRADE_ACCEPT_UPDATE", 1, 1)
         F.Trade("TRADE_CLOSED")
-        _G.GetTradeTargetItemInfo, _G.GetTradeTargetItemLink = realInfo, realLink
+        stub("GetTradeTargetItemInfo", nil) stub("GetTradeTargetItemLink", nil)
         out.afterTrade = select(2, F.Totals(z.db.fish))                                    -- 1: the loose fish
         -- Cy mails him a present; the Auction House "mails" one too (not a player: not noted)
         F.Mail("Cy", { present = true, item = "Wrapped Gift", count = 1 }, true)
@@ -1691,7 +1695,8 @@ add("wrapped fish: a present traded or mailed to Zennit is noted, and the fish t
         for _, g in ipairs(all) do out.by[g.name] = g.count end
         out.left = #z.db.presents
     end)
-    ST.print, ST.Gag.IsZennit, _G.UnitName = realPrint, realIsZennit, realName
+    ST.print, ST.Gag.IsZennit = realPrint, realIsZennit
+    stub("UnitName", nil)
     if not ok then return false, tostring(err) end
     local by = out.by or {}
     return out.isPresent and not out.notPresent and out.afterTrade == 1 and out.noted == 2 and out.nothingYet == 0 and out.first == 5
@@ -2128,7 +2133,7 @@ add("a provisional Monday: announced as provisional while he can still answer, t
     return newRules(function()
         local W = ST.Week
         local a = newClient("Alpha")
-        local printed, realPrint, realTime = {}, ST.print, time
+        local printed, realPrint = {}, ST.print
         local out = {}
         local function say() return table.concat(printed, "\n") end
         local ok, err = pcall(function()
@@ -2140,7 +2145,7 @@ add("a provisional Monday: announced as provisional while he can still answer, t
                     response = { result = "accepted", zroll = 0, sroll = 0, time = last + 3700 } }
                 a.db.events.y = { caster = "Alpha", target = "Zennit", assistants = {}, time = last + 7200, points = 3, kind = "zone" }
                 ST.print = function(text) printed[#printed + 1] = text end
-                rawset(_G, "time", function() return monday + 86400 end)          -- Tuesday: he can still answer
+                stub("time", function() return monday + 86400 end)          -- Tuesday: he can still answer
                 W.Check()
                 out.first = say()
                 out.provisional = a.db.settings.weekAnnounced and a.db.settings.weekAnnounced.provisional
@@ -2148,13 +2153,13 @@ add("a provisional Monday: announced as provisional while he can still answer, t
                 -- his late answer: he wins the dice, and the week is his
                 a.db.events.y.response = { result = "won", zroll = 90, sroll = 10, time = monday + 80000 }
                 printed = {}
-                rawset(_G, "time", function() return monday + 3 * 86400 end)      -- Thursday: the week has closed
+                stub("time", function() return monday + 3 * 86400 end)      -- Thursday: the week has closed
                 W.Check()
                 out.second = say()
                 out.settled = a.db.settings.weekAnnounced and a.db.settings.weekAnnounced.provisional
             end)
         end)
-        rawset(_G, "time", realTime)
+        stub("time", nil)
         ST.print = realPrint
         if not ok then return false, "ERROR " .. tostring(err) end
         local pass = out.first:find("Provisional:", 1, true) and out.first:find("1 summons of him is still waiting", 1, true)
@@ -2395,7 +2400,7 @@ add("the week's clock in the player's time, a last call in the final day, and /s
     return newRules(function()
         local W = ST.Week
         local a = newClient("Alpha")
-        local printed, realPrint, realTime, savedCall = {}, ST.print, time, W.RULES.lastCall
+        local printed, realPrint, savedCall = {}, ST.print, W.RULES.lastCall
         local out = {}
         local ok, err = pcall(function()
             with(a, function()
@@ -2405,7 +2410,7 @@ add("the week's clock in the player's time, a last call in the final day, and /s
                     response = { result = "accepted", zroll = 0, sroll = 0, time = start + 90 } }
                 ST.print = function(text) printed[#printed + 1] = text end
                 out.closes, out.answers = W.ClosesText(start)
-                rawset(_G, "time", function() return start + 7 * 86400 - 3 * 3600 end)      -- three hours before the week closes
+                stub("time", function() return start + 7 * 86400 - 3 * 3600 end)      -- three hours before the week closes
                 out.left = W.LastCall()
                 out.status = W.StatusLine(start)
                 out.brief = W.Briefing("Zennit")
@@ -2417,13 +2422,13 @@ add("the week's clock in the player's time, a last call in the final day, and /s
                 W.Replay()                                                                   -- /sc week login: said again
                 out.replayed = select(2, table.concat(printed, " | "):gsub("closes this week on", ""))
                 out.replayErrors = #ST.errors - errors
-                rawset(_G, "time", function() return start + 2 * 86400 end)                  -- early in the week: no last call
+                stub("time", function() return start + 2 * 86400 end)                  -- early in the week: no last call
                 out.early = W.LastCall()
                 out.earlyStatus = W.StatusLine(start)
                 out.card = table.concat(W.RulesCard(start), "\n")
             end)
         end)
-        rawset(_G, "time", realTime)
+        stub("time", nil)
         ST.print = realPrint
         W.RULES.lastCall = savedCall
         if not ok then return false, "ERROR " .. tostring(err) end
@@ -2444,11 +2449,11 @@ end)
 
 local guardRuns = 0
 add("errors are caught and said once, kept for /sc errors, and a failing step does not stop the next", function()
-    local printed, realPrint, realHandler = {}, ST.print, geterrorhandler
+    local printed, realPrint = {}, ST.print
     local saved = ST.errors
     ST.errors = {}
     ST.print = function(text) printed[#printed + 1] = text end
-    geterrorhandler = function() return function() end end                     -- the deliberate "boom" must not reach the game's error window
+    stub("geterrorhandler", function() return function() end end)                    -- the deliberate "boom" must not reach the game's error window
     local ran = false
     local bad = function() error("boom") end
     guardRuns = guardRuns + 1 -- a problem is said once a session, so each run of the tests needs a step of its own
@@ -2458,7 +2463,8 @@ add("errors are caught and said once, kept for /sc errors, and a failing step do
     local ok2, value = ST.Guard("the second step", function() ran = true return "fine" end)
     local safe = ST.Safe("an event", function(a, b) return a + b end)
     local sum = select(2, safe(2, 3))
-    ST.print, geterrorhandler = realPrint, realHandler
+    ST.print = realPrint
+    stub("geterrorhandler", nil)
     local kept, said = #ST.errors, #printed
     local first = ST.errors[1]
     ST.errors = saved
@@ -3071,7 +3077,6 @@ add("watching together: a chapter shown to the group, asked of those who reached
     return newRules(function()
         local a, I, W, out = newClient("Alpha"), ST.Intro, ST.Week, {}
         local realAsk, realOnWatch, realPlay, realPrint = I.ask, Sync.onWatch, I.Play, ST.print
-        local realRaid, realLeader = IsInRaid, UnitIsGroupLeader
         local asked, played, watched = {}, {}, {}
         I.ask = function(text, onAccept) asked[#asked + 1] = text onAccept() end
         I.Play = function(key) played[#played + 1] = key end
@@ -3090,14 +3095,14 @@ add("watching together: a chapter shown to the group, asked of those who reached
             out.reached = I.OnWatch("Bo", "g1")
             out.notReached = I.OnWatch("Bo", "g2")                                             -- not reached here yet: Bo's client checked
             out.unwritten = I.OnWatch("Bo", "g9")
-            rawset(_G, "IsInRaid", function() return true end)
-            rawset(_G, "UnitIsGroupLeader", function() return true end)
+            stub("IsInRaid", function() return true end)
+            stub("UnitIsGroupLeader", function() return true end)
             I.RaidGathered()
             I.RaidGathered()                                                                   -- once a week
         end)
         I.ask, Sync.onWatch, I.Play, ST.print = realAsk, realOnWatch, realPlay, realPrint
-        rawset(_G, "IsInRaid", realRaid)
-        rawset(_G, "UnitIsGroupLeader", realLeader)
+        stub("IsInRaid", nil)
+        stub("UnitIsGroupLeader", nil)
         if not ok then return false, "ERROR " .. tostring(err) end
         local good = out.key == "g1" and out.party == "asked" and watched[1] == "Bo:g1" and out.guild == "rejected:channel"
             and out.bad == "bad" and out.reached == true and out.notReached == true and out.unwritten == false
@@ -3851,30 +3856,32 @@ local function ritual(steps)
         witness = Sync.SendWitness, print = ST.print, me = Store.me, lastCommit = D.lastCommit }
     D.lastCommit = 0 -- our clock starts at 10: a commit made on the real one must not look like a second SUCCEEDED
     local now = real.time()
-    rawset(_G, "UnitName", function(u)
+    stub("UnitName", function(u)
         if u == "player" then return "Wally" end
         if u == "target" then return target end
         if u == "party1target" or u == "party2target" then return "Zennit" end
         local i = tonumber((u or ""):match("^party(%d)$"))
         return i and roster[i] or nil
     end)
-    rawset(_G, "UnitExists", function(u)
+    stub("UnitExists", function(u)
         local i = tonumber((u or ""):match("^party(%d)$"))
         return u == "player" or (i ~= nil and i <= #roster)
     end)
-    rawset(_G, "UnitChannelInfo", function(u)
+    stub("UnitChannelInfo", function(u)
         if channeling[u] then return "Ritual of Summoning", "", 0, 0, 0, false, false, ST.RITUAL_ID end
     end)
-    rawset(_G, "IsInRaid", function() return false end)
-    rawset(_G, "GetTime", function() return gt end)
-    rawset(_G, "time", function(t) if t then return real.time(t) end return now end)
-    rawset(C_Timer, "NewTicker", function(_, fn)
+    stub("IsInRaid", function() return false end)
+    stub("GetTime", function() return gt end)
+    stub("time", function(t) if t then return real.time(t) end return now end)
+    local timer = setmetatable({}, { __index = C_Timer }) -- the game's C_Timer, with two calls stood in for
+    stub("C_Timer", timer)
+    rawset(timer, "NewTicker", function(_, fn)
         local t = { fn = fn }
         t.Cancel = function() t.dead = true end
         tickers[#tickers + 1] = t
         return t
     end)
-    rawset(C_Timer, "NewTimer", function() return { Cancel = function() end } end)
+    rawset(timer, "NewTimer", function() return { Cancel = function() end } end)
     P.Ask = function(tgt, candidates, pre, onDone) got.asked = { target = tgt, pre = pre, done = onDone } end
     Sync.SendWitness = function(note) got.notes[#got.notes + 1] = note end
     ST.print = function() end
@@ -3898,14 +3905,13 @@ local function ritual(steps)
     -- whatever happened, the player's own channel ends, so the witness is free again on a real client
     channeling.player = nil
     pcall(with, a, function() D.OnWitness(nil, "UNIT_SPELLCAST_CHANNEL_STOP", "player") end)
-    rawset(_G, "UnitName", real.UnitName)
-    rawset(_G, "UnitExists", real.UnitExists)
-    rawset(_G, "UnitChannelInfo", real.UnitChannelInfo)
-    rawset(_G, "IsInRaid", real.IsInRaid)
-    rawset(_G, "GetTime", real.GetTime)
-    rawset(_G, "time", real.time)
-    rawset(C_Timer, "NewTicker", real.NewTicker)
-    rawset(C_Timer, "NewTimer", real.NewTimer)
+    stub("UnitName", nil)
+    stub("UnitExists", nil)
+    stub("UnitChannelInfo", nil)
+    stub("IsInRaid", nil)
+    stub("GetTime", nil)
+    stub("time", nil)
+    stub("C_Timer", nil)
     P.Ask = real.ask
     Sync.SendWitness, ST.print, Store.me = real.witness, real.print, real.me
     D.lastCommit = real.lastCommit
@@ -4320,6 +4326,61 @@ add("a tombstone a peer sends is stamped with the wall clock, as the caster's ow
     local mine, theirs = a.db.deleted and a.db.deleted[id], b.db.deleted and b.db.deleted[id]
     local good = b.db.events[id] == nil and mine and theirs and math.abs(theirs - time()) <= 5 and math.abs(mine - time()) <= 5
     return good, string.format("caster's %s, peer's %s, now %d", tostring(mine), tostring(theirs), time())
+end)
+
+add("the wire (/sc wire) says each message in plain words, is quiet when off or for our own echo, and records for the admin", function()
+    local a = newClient("Alpha")
+    local printed, out = {}, {}
+    local real = { print = ST.print, wire = Sync.wire, log = Sync.wireLog, max = Sync.WIRE_MAX, onWire = Sync.onWire, admin = ST.IsAdmin }
+    ST.print = function(text) printed[#printed + 1] = text end
+    local admin = true
+    ST.IsAdmin = function() return admin end
+    Sync.onWire = nil
+    local ok, err = pcall(with, a, function()
+        local rec = "1~E~" .. Sync.Encode("Alpha-" .. BASE, { caster = "Alpha", target = "Zennit", assistants = { "Cy", "Di" },
+            mapID = 1436, subzone = "Sentinel Hill", time = BASE, wrote = BASE, confirmed = true })
+        -- chat: off says nothing; on says each message
+        Sync.wire = false
+        Sync.ClearWire()
+        Sync.Tap("out", "PARTY", nil, rec, true)
+        Sync.wire = true
+        Sync.Tap("out", "PARTY", nil, rec, true)
+        Sync.Tap("in", "PARTY", "Alpha", rec, "ignored:self")                 -- our own broadcast coming back: not said
+        Sync.Tap("in", "WHISPER", "Bo-Realm", "1~R~" .. BASE, "asked")
+        Sync.Tap("out", "WHISPER", "Bo", "1~H~3|" .. BASE .. "|0.32.1|0|0|0||0badf00d", false)
+        Sync.Tap("in", "GUILD", "Cy", "9~Z~whatever", "ignored:version")      -- a kind it does not know: shown as it came
+        out.recordedWhileOff = #Sync.wireLog                                   -- chat alone keeps nothing
+        Sync.wire = false
+        Sync.Hello("WHISPER", "Bo")
+        Sync.Pump(1)                                                           -- a real hello, as it goes out
+        out.describedHello = Sync.Describe(a.out[1] and a.out[1].payload or "")
+        -- the recorder: the admin's only, and the last WIRE_MAX messages
+        out.on = Sync.SetRecording(true)
+        Sync.WIRE_MAX = 3
+        for n = 1, 5 do Sync.Tap("in", "PARTY", "Cy", "1~V~g" .. n, "noted") end
+        Sync.Tap("in", "PARTY", "Alpha", rec, "ignored:self")
+        out.kept, out.oldest = #Sync.wireLog, Sync.wireLog[1] and Sync.wireLog[1].payload
+        out.line = Sync.wireLog[3] and Sync.WireLine(Sync.wireLog[3])
+        admin = false                                                          -- a player: the switch does nothing for them
+        out.player = Sync.Recording()
+        Sync.Tap("in", "PARTY", "Cy", "1~V~g9", "noted")
+        out.keptAfter = #Sync.wireLog
+        admin = true
+        Sync.SetRecording(false)
+        out.off = Sync.Recording()
+    end)
+    ST.print, Sync.wire, Sync.wireLog, Sync.WIRE_MAX, Sync.onWire, ST.IsAdmin = real.print, real.wire, real.log, real.max, real.onWire, real.admin
+    if not ok then return false, "ERROR " .. tostring(err) end
+    local good = #printed == 4 and printed[1]:find(">> PARTY", 1, true) and printed[1]:find("new summons: Alpha summoned Zennit (helpers: Cy, Di)", 1, true)
+        and printed[2]:find("<< Bo-Realm via whisper", 1, true) and printed[2]:find("request: send me everything after", 1, true)
+        and printed[2]:find("[asked]", 1, true) and printed[3]:find("whisper to Bo", 1, true) and printed[3]:find("game refused it", 1, true)
+        and printed[3]:find("hello: 3 summons", 1, true) and printed[4]:find("Z whatever (protocol 9)", 1, true)
+        and out.recordedWhileOff == 0 and out.describedHello:find("^H hello: ") ~= nil
+        and out.on == true and out.kept == 3 and out.oldest == "1~V~g3" and out.line and out.line:find("showing the group story chapter g5", 1, true)
+        and out.player == false and out.keptAfter == 3 and out.off == false
+    return good and true or false, string.format("%d lines, recorded while off %s, hello %s; kept %s from %s, player records %s (%s), off %s",
+        #printed, tostring(out.recordedWhileOff), tostring(out.describedHello), tostring(out.kept), tostring(out.oldest),
+        tostring(out.player), tostring(out.keptAfter), tostring(out.off))
 end)
 -- ===== [end tests:LOG] =====
 

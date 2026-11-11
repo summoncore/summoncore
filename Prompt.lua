@@ -1,6 +1,7 @@
 -- Prompt: caster confirmation dialog for ritual assistants. It saves itself after AUTO_SAVE seconds with the names
 -- ticked (the helpers that were detected), so nobody has to do the bookkeeping; changing a tick stops the countdown.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Prompt = {}
 ST.Prompt = Prompt
 local T = ST.Theme

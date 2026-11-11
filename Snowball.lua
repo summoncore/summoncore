@@ -3,6 +3,7 @@
 -- thrower, and the leaderboard (Leaders.lua) ranks them. Zennit's client also says who hit him. A throw from someone without the
 -- addon is not seen. /sc snowballs, and the leaderboard's third board.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Snowball = {}
 ST.Snowball = Snowball
 

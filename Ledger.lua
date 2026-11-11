@@ -4,6 +4,7 @@
 -- how the season ended before this one, and how this week stands. Build is pure (state in, sentences out) so it
 -- can be tried without the game; State reads the live season.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Ledger = {}
 ST.Ledger = Ledger
 

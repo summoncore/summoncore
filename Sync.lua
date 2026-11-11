@@ -27,6 +27,7 @@
 -- can send or delete it (design/lenses.md, Accessibility, G).
 -- Fields are percent-escaped. Points and kind are never trusted from the wire: they are recomputed.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Sync = {}
 ST.Sync = Sync
 
@@ -395,7 +396,9 @@ function Sync.Pump(max)
     st.bulk = st.bulk or {}
     while n < max and (#st.queue > 0 or #st.bulk > 0) do
         local m = table.remove(#st.queue > 0 and st.queue or st.bulk, 1)
-        Sync.transport(m.channel, m.target, m.payload)
+        local ok, result = Sync.transport(m.channel, m.target, m.payload)
+        -- the game refuses with an error, false, or (newer clients) an Enum.SendAddonMessageResult other than 0, Success
+        Sync.Tap("out", m.channel, m.target, m.payload, not (ok == false or result == false or (type(result) == "number" and result ~= 0)))
         n = n + 1
     end
     return n
@@ -1258,6 +1261,129 @@ end
 ----------------------------------------------------------------------
 -- Wiring
 ----------------------------------------------------------------------
+----------------------------------------------------------------------
+-- The wire: every message this client sends or receives, for watching how clients talk to each other. An admin tool, in two
+-- parts, each switched on its own: the recorder keeps the last WIRE_MAX messages in memory (never saved: gone at /reload) for
+-- the Sync tab's list, and chat says each one as it goes. The recorder's switch is saved (ST.db.settings.wireRecord), so it
+-- catches the hello at login; chat is off at each login, as it can be busy (a newcomer's catch-up is hundreds of B messages).
+----------------------------------------------------------------------
+Sync.wire = false  -- chat
+Sync.wireLog = {}  -- the recorder: { time, dir, channel, who, payload, outcome }, oldest first
+Sync.WIRE_MAX = 300
+Sync.onWire = nil  -- called after each message recorded (the Sync tab, to refresh its list)
+
+function Sync.Recording()
+    return ST.db and ST.db.settings and ST.db.settings.wireRecord == true and ST.IsAdmin() or false
+end
+
+function Sync.SetRecording(on)
+    if ST.db and ST.db.settings then ST.db.settings.wireRecord = on and true or nil end
+    return Sync.Recording()
+end
+
+function Sync.ClearWire()
+    Sync.wireLog = {}
+end
+
+local function when(t)
+    t = tonumber(t)
+    return (t and t > 0) and date("%d %b %H:%M", t) or "never"
+end
+
+local function names(list)
+    list = unesc(list or "")
+    return list ~= "" and list:gsub(",", ", ") or "nobody"
+end
+
+local function record(f)
+    local answer = f[10] and f[10] ~= "" and (", answered " .. unesc(f[10]):match("^[^,;:]*")) or ""
+    return string.format("%s summoned %s (helpers: %s) at %s%s", unesc(f[2] or "?"), unesc(f[3] or "?"), names(f[4]),
+        when(f[7]), answer)
+end
+
+-- What each kind of message says, from its fields (the list at the top of this file).
+local DESCRIBE = {
+    H = function(f) return string.format("hello: %s summons, latest %s, version %s%s", f[1] or "?", when(f[2]), unesc(f[3] or "?"),
+        f[8] and (", digest " .. f[8]) or "") end,
+    E = function(f) return "new summons: " .. record(f) end,
+    B = function(f) return "catch-up record: " .. record(f) end,
+    R = function(f)
+        if not f[2] then return "request: send me everything after " .. when(f[1]) end
+        return string.format("request: my weeks from %s to %s differ, send those", when(f[1]), when(f[2]))
+    end,
+    N = function(f) return string.format("catch-up done: %s sent%s", f[1] or "?", f[2] == "1" and " (cut short, ask again for older)" or "") end,
+    G = function(f) return "Zennit's characters: " .. names(f[2]) end,
+    L = function(f) return string.format("Zennit's line %s: %s", unesc(f[1] or "?"), unesc(f[3] or "")) end,
+    F = function(f) return string.format("feeling about week %s (%s): %s of 3", when(f[1]), f[2] == "z" and "as Zennit" or "as the group", f[3] or "?") end,
+    V = function(f) return "showing the group story chapter " .. unesc(f[1] or "?") end,
+    W = function(f) return string.format("witness: %s summoning %s, helpers %s, at %s", unesc(f[1] or "?"), unesc(f[2] or "?"),
+        names(f[3]), when(f[6])) end,
+    C = function(f) return string.format("season %s at %s", unesc(f[1] or "?"), when(f[2])) end,
+    Q = function(f) return string.format("question %s for Zennit's client: %s %s", unesc(f[1] or "?"), unesc(f[2] or "?"), unesc(f[3] or "")) end,
+    Y = function(f) return string.format("reply to %s: %s is %s %s", unesc(f[1] or "?"), unesc(f[2] or "?"), unesc(f[3] or "?"), unesc(f[4] or "")) end,
+    P = function(f) return string.format("fish book: %s gave %s (this week %s)", unesc(f[1] or "?"), f[2] or "?", f[3] or "?") end,
+    O = function(f) return string.format("snowballs: %s at Zennit (this week %s)%s", f[1] or "?", f[2] or "?", f[5] == "1" and ", one just thrown" or "") end,
+}
+
+-- One message in plain words: "H hello: 42 summons, latest 10 Nov 21:14, ...". Anything it does not know is shown as it came.
+function Sync.Describe(payload)
+    local proto, typ, body = tostring(payload):match("^(%d+)~(%a)~(.*)$")
+    if not proto then return "not a Summon Core message: " .. tostring(payload) end
+    local fn = DESCRIBE[typ]
+    local ok, text = false, nil
+    if fn then ok, text = pcall(fn, split(body, "|")) end
+    if not ok or not text then text = body end
+    return typ .. " " .. text .. (tonumber(proto) ~= PROTO and (" (protocol " .. proto .. ")") or "")
+end
+
+-- Where a message went or came from, in words: "PARTY", "whisper to Bo", "whisper".
+function Sync.WireWhere(e)
+    if e.channel ~= "WHISPER" then return tostring(e.channel) end
+    return e.dir == "out" and ("whisper to " .. tostring(e.who)) or "whisper"
+end
+
+-- What became of a message: for one sent, "refused" if the game would not take it; for one received, what this client did
+-- with it (Sync.OnMessage: "kept", "asked", "rejected:sender"...). nil when there is nothing to say.
+function Sync.WireOutcome(e)
+    if e.dir == "out" then return e.outcome == false and "the game refused it" or nil end
+    return (type(e.outcome) == "string" and e.outcome ~= "") and e.outcome or nil
+end
+
+-- One recorded message as a line of chat.
+function Sync.WireLine(e)
+    local outcome = Sync.WireOutcome(e)
+    if e.dir == "out" then
+        return string.format("|cff888888[wire]|r |cff66ccff>> %s|r %s%s", Sync.WireWhere(e), Sync.Describe(e.payload),
+            outcome and (" |cffff4444(" .. outcome .. ")|r") or "")
+    end
+    return string.format("|cff888888[wire]|r |cff99ff99<< %s via %s|r %s%s", ST.safe(e.who), Sync.WireWhere(e), Sync.Describe(e.payload),
+        outcome and (" |cff888888[" .. outcome .. "]|r") or "")
+end
+
+-- One message on the wire. dir "out": `who` is the target of a whisper (nil for a group or guild message), `outcome` true or
+-- false for whether the game took it. dir "in": `who` is the sender, `outcome` what this client did with it. Our own group
+-- and guild messages come back to us too; those are left out.
+function Sync.Tap(dir, channel, who, payload, outcome)
+    if dir == "in" and outcome == "ignored:self" then return end
+    local record, chat = Sync.Recording(), Sync.wire and ST.IsAdmin()
+    if not (record or chat) then return end
+    local e = { time = time(), dir = dir, channel = channel, who = who, payload = payload, outcome = outcome }
+    if record then
+        local log = Sync.wireLog
+        log[#log + 1] = e
+        while #log > Sync.WIRE_MAX do table.remove(log, 1) end
+        if Sync.onWire then pcall(Sync.onWire) end
+    end
+    if chat then ST.print(Sync.WireLine(e)) end
+end
+
+-- Chat on or off (nil: the other way round).
+function Sync.ToggleWire(on)
+    if on == nil then on = not Sync.wire end
+    Sync.wire = on and true or false
+    return Sync.wire
+end
+
 function Sync.Status()
     local st = Sync.state
     ST.print(string.format("Sync: %d summons, latest %s, %d queued, channels: %s", ST.Store.Count(),
@@ -1284,6 +1410,9 @@ frame:SetScript("OnEvent", ST.Safe("sync", function(_, event, ...)
         grouped = now
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, text, channel, sender = ...
-        if prefix == PREFIX then Sync.OnMessage(text, channel, sender) end
+        if prefix == PREFIX then
+            local outcome = Sync.OnMessage(text, channel, sender)
+            Sync.Tap("in", channel, sender, text, outcome)
+        end
     end
 end))

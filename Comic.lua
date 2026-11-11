@@ -1,6 +1,7 @@
 -- Comic: /sc comic shows generated test textures at different sizes, to find out how large and how
 -- sharp images can get in this client. Textures come from tools\make_test_patterns.ps1.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Comic = {}
 ST.Comic = Comic
 

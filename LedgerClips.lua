@@ -2,6 +2,7 @@
 -- The length in seconds of each recording of "The Index today" (Media/ledger/<id>.ogg): whole lines, then the short
 -- fragments a spliced line is made of (their lengths are exact, with no silence at either end).
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 ST.ledgerClips = {
     recap_z1 = 5.60,
     recap_z2 = 6.40,

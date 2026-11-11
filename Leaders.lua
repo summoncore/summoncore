@@ -3,6 +3,7 @@
 -- client), and who has thrown the most snowballs at him (Snowball.Board, each thrower's client says). /sc leaders, the Party tab's
 -- Leaders section, and the Tools tab's Leaderboard.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Leaders = {}
 ST.Leaders = Leaders
 

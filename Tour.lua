@@ -5,6 +5,7 @@
 -- that are closed to one side or the other.
 -- Rebuild the recordings with tools/intro/build_tour_audio.py after changing LINES (.claude/skills/zenit-narrator-audio).
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Tour = {}
 ST.Tour = Tour
 local T = ST.Theme

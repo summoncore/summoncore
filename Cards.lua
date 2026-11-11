@@ -4,6 +4,7 @@
 -- punches used are not stored anywhere: they are counted from the summons he settled with a punch (answers carrying the card
 -- flag), oldest card first, so every client agrees and nothing can drift.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Cards = {}
 ST.Cards = Cards
 

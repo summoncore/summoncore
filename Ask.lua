@@ -9,6 +9,7 @@
 -- (he has switched them off) or "unasked" (his client does not know the key). Values are short strings, never trusted for more
 -- than what they say.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Ask = {}
 ST.Ask = Ask
 
