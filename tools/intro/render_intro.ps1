@@ -56,6 +56,11 @@ var q = new URLSearchParams(location.hash.slice(1));
     }
     render(+q.get('s'), +q.get('f'), +q.get('f'));
     if (q.has('line')) expandUses();
+    // the neon look letters in bold capitals, which run wider: every label is set a little smaller so it keeps its place
+    if (q.has('line')) Array.prototype.slice.call(document.querySelectorAll('#stage text')).forEach(function (t) {
+      var size = parseFloat(t.getAttribute('font-size') || getComputedStyle(t).fontSize);
+      if (size) { t.setAttribute('font-size', (size * 0.8).toFixed(1)); t.style.fontSize = (size * 0.8).toFixed(1) + 'px'; }
+    });
   } else { update(0); requestAnimationFrame(loop); }
 })();
 '@
@@ -83,7 +88,10 @@ $lineCss = 'html.shot.line .stage{background:#000}' +
   'html.shot.line text{fill:#6dff9a!important;stroke:none!important}' +
   'html.shot.line text[fill][fill][fill][fill][fill]{fill:#6dff9a!important}'
 $baseCss = 'html.shot,html.shot body{margin:0;padding:0;overflow:hidden;background:#000}html.shot main>*:not(.stage){display:none}html.shot header,html.shot .bigplay{display:none}html.shot .stage{position:fixed;left:0;top:0;width:100vw;height:100vh;max-width:none;border:0;border-radius:0;aspect-ratio:auto}'
-$css = '<style>' + $baseCss + $lineCss + '</style></head>'
+# the neon look's colours (a colour for each subject, glowing tube lines, capital labels) are in lines.css, which
+# tools\intro\render_intro.py reads too
+$guideCss = [IO.File]::ReadAllText((Join-Path $here "lines.css"))
+$css = '<style>' + $baseCss + $lineCss + $guideCss + '</style></head>'
 $patched = $tail.Replace($html, { param($m) $patch }).Replace("</head>", $css)
 $page = Join-Path $work "render.html"
 [IO.File]::WriteAllText($page, $patched)

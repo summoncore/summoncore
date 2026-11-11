@@ -484,6 +484,23 @@ add("tour: every step has a line and a recording, every outline finds its part o
     return #bad == 0, #bad == 0 and string.format("%d steps for the party, %d for Zennit", #party, #zennit) or table.concat(bad, "; ")
 end)
 
+add("intro build-up: the picture is drawn on in steps, a part stays dark until it is about to be mentioned, a big or early one never", function()
+    local I = ST.Intro
+    local list = { { t = 0.6, x = 0, y = 0, w = 100, h = 100 }, { t = 10, x = 200, y = 0, w = 100, h = 100 },
+        { t = 14, x = 200, y = 0, w = 100, h = 100 }, { t = 12, x = 0, y = 0, w = 900, h = 500 } }
+    local w0, p0 = I.BuildUp(list, 0)
+    local w1, p1 = I.BuildUp(list, 0.45)
+    local w2, p2 = I.BuildUp(list, 5)
+    local _, p3 = I.BuildUp(list, 9.7)
+    local _, p4 = I.BuildUp(list, 9.95)
+    local wNone, pNone = I.BuildUp(nil, 3)
+    local good = w0 == 1 and #p0 == 1 and p0[1].hidden == 1 and w1 == 0.5 and w2 == 0 and #p2 == 1 and p2[1].x == 200
+        and p3[1].hidden > 0 and p3[1].hidden < 1 and #p4 == 0 and wNone == 0 and #pNone == 0
+        and I.Flash(0) == 1 and I.Flash(0.1) == 0.25 and I.Flash(2) == 0.8
+    return good, string.format("opens %s dark with %d part, half-way %s, later %s with %d; part %s then %d left; no boxes %s/%d",
+        tostring(w0), #p0, tostring(w1), tostring(w2), #p2, tostring(p3[1] and p3[1].hidden), #p4, tostring(wNone), #pNone)
+end)
+
 add("intro highlights: a box is up while its subject is mentioned, and the generated boxes fit the picture", function()
     local I = ST.Intro
     local list = { { t = 1, x = 0, y = 0, w = 10, h = 10 }, { t = 6, x = 5, y = 5, w = 10, h = 10 } }
