@@ -5,6 +5,7 @@
 -- (also the Tools tab's Fish). The book itself stays on his client; each giver's totals are shared with everyone (message P), so the
 -- leaderboard (Leaders.lua) can rank the givers on every client.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Fish = {}
 ST.Fish = Fish
 
@@ -199,7 +200,7 @@ end
 -- Watching the client (Zennit's only)
 ----------------------------------------------------------------------
 local function call(name, ...)
-    local fn = _G[name]
+    local fn = ST.env[name]
     if type(fn) ~= "function" then return nil end
     local results = { pcall(fn, ...) }
     if not results[1] then return nil end

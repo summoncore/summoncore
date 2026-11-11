@@ -5,6 +5,7 @@
 -- is also kept as db.resetAll, which every hello passes on (Sync), so a client that missed the request is asked later;
 -- a friend's own reset stays on their client.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Reset = {}
 ST.Reset = Reset
 

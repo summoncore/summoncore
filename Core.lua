@@ -1,8 +1,16 @@
 local ADDON, ST = ...
 
+-- The addon's own globals. Every file runs with this table as its environment (setfenv below): reading a global falls through
+-- to the game's _G, and assigning one still writes it there. It exists so the self-test can stand in for the game's functions
+-- (UnitName, time, C_Timer...) without ever writing to _G: WoW marks a global as tainted by whoever wrote it last, even when
+-- the original is put back, and the Blizzard UI then runs tainted every time it calls it (the target frame calls UnitName on
+-- each new target, and is blocked from its protected actions: "Summon Core has been blocked from an action...").
+ST.env = setmetatable({}, { __index = _G, __newindex = _G })
+setfenv(1, ST.env)
+
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.30.0"
+ST.version = "0.32.1"
 
 local DB_VERSION = 1
 

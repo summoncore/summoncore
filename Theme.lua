@@ -3,6 +3,7 @@
 -- Windows, buttons, tabs, edit boxes, check boxes and scroll areas are drawn from flat colour textures,
 -- so there is no art to rebuild.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Theme = {}
 ST.Theme = Theme
 

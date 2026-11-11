@@ -5,6 +5,7 @@
 -- sends nothing. Another player's words are never printed (only whether they could be read, and how long they were); your
 -- own are, so run it on Zennit's client and say a line after you arrive.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Probe = {}
 ST.Probe = Probe
 

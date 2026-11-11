@@ -27,6 +27,7 @@
 -- can send or delete it (design/lenses.md, Accessibility, G).
 -- Fields are percent-escaped. Points and kind are never trusted from the wire: they are recomputed.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Sync = {}
 ST.Sync = Sync
 

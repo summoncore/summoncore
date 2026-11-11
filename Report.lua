@@ -3,6 +3,7 @@
 -- journal. It answers the questions in design/playtest.md that numbers can answer: how many summons a week, how he spends
 -- his dice, how often the list hits, whether he closes, who wins the weeks. Nothing is stored and nothing is synced.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Report = {}
 ST.Report = Report
 

@@ -5,6 +5,7 @@
 -- group's), 2z<n> and 2g<n> the chapters for each side's nth win. A scene whose recording is missing (no length for it in
 -- IntroCues.lua) is typed and silent, timed to be read, and borrows the picture of the scene named by `art` if it has one.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 
 ST.seasonScenes = ST.seasonScenes or {}
 ST.seasonScenes[2] = {

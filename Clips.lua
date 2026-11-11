@@ -3,6 +3,7 @@
 -- narrator_weekopen_01_lewis). AddOns cannot list a folder, so tools\build_clip_manifest.ps1 scans it and
 -- writes ClipList.lua; run it after adding or removing clips, then /reload.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Clips = {}
 ST.Clips = Clips
 

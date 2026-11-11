@@ -4,6 +4,7 @@
 -- its own on his. Drawn in the Neon Index look (Theme.lua):
 -- a title strip, the tabs, the season race on every tab, and a command-prompt status line along the bottom.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Hub = {}
 ST.Hub = Hub
 local T = ST.Theme

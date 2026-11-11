@@ -1,6 +1,7 @@
 -- Diagnostics harness: /sc test. One table entry per API the plan depends on.
 -- Each test returns status ("pass" | "fail" | "error" | "info"), detail text.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local safe = ST.safe
 
 local RITUAL_ID = ST.RITUAL_ID

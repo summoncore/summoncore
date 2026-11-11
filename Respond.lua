@@ -10,6 +10,7 @@
 -- His answer is stored on the event and sent to everyone (message Z); only his own client can answer for him.
 -- The dice use messages D (his roll, to the summoner) and S (the summoner's roll, back to him).
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Respond = {}
 ST.Respond = Respond
 local T = ST.Theme

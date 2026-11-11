@@ -1,5 +1,6 @@
 -- Gag: Zennit detection and the "ah-ah-ah" access-denied clip. A joke gate for friends, not security.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Gag = {}
 ST.Gag = Gag
 

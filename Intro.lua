@@ -4,6 +4,7 @@
 -- beeps and clicks (the full text is available behind the Text button). Rebuild the art with
 -- tools\intro\render_intro.ps1 and the audio and cue timings with tools\intro\build_audio.ps1.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Intro = {}
 ST.Intro = Intro
 

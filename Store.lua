@@ -1,6 +1,7 @@
 -- Store: the only module that touches SummonTrackerDB. The event log is the source of truth;
 -- tallies are always derived from it.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Store = {}
 ST.Store = Store
 

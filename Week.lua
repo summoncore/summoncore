@@ -6,6 +6,7 @@
 -- A week closes two days after it ends: Zennit can no longer answer into it (Week.LateAnswer), so its result then only
 -- changes if a summons made in it reaches a client late, and then the same way on every client.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Week = {}
 ST.Week = Week
 

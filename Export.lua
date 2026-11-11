@@ -5,6 +5,7 @@
 --   The records (Sync.Encode, joined by "~") are LZW-compressed into 12-bit codes, packed into bytes and
 --   base64-encoded. <codes> is the number of 12-bit codes, <checksum> an Adler-32 of the plain text.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Export = {}
 ST.Export = Export
 local T = ST.Theme

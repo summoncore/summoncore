@@ -1,5 +1,6 @@
 -- Scoring: zone value table, points and badge rules. Placeholder values to argue about.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Scoring = {}
 ST.Scoring = Scoring
 

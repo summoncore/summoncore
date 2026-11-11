@@ -2,6 +2,7 @@
 -- Only the caster's client sees the cast; everyone else is credited from the snapshot. Every other client in the group watches
 -- too (the witness, below), so Zennit's client can file a summons whose caster has no addon.
 local ADDON, ST = ...
+setfenv(1, ST.env) -- the addon's own globals (Core.lua)
 local Detector = {}
 ST.Detector = Detector
 
