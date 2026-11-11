@@ -374,7 +374,10 @@ local function show(sec)
         lastLine = nil
         if playing then
             -- the intro seen, once, when it is played from the top to its last scene: the tour's jokes lean on it
-            if fromTop and si == lastOf[1] and not ST.db.settings.introWatched then ST.db.settings.introWatched = true end
+            if fromTop and si == lastOf[1] and not ST.db.settings.introWatched then
+                ST.db.settings.introWatched = true
+                ST.Achieve.Soon()
+            end
             playClip(si, true)
             if posOf(si) > 1 and not ST.db.settings.introMute then pcall(PlaySoundFile, SFX .. "sfx_pop.ogg", "SFX") end
         end

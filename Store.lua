@@ -19,7 +19,7 @@ local function newID(caster, t)
 end
 
 -- ev: caster, target, assistants (list), mapID, subzone, time, confirmed.
--- Returns the id, the event, and a list of badge names earned by this save.
+-- Returns the id, the event, and a list of the achievements earned by this save (their names).
 -- localOnly keeps the event off the network (used for test events).
 function Store.Add(ev, localOnly)
     -- at most two assistants, each named once, and neither the caster nor the target: the same rule Sync.Decode holds every
@@ -44,7 +44,7 @@ function Store.Add(ev, localOnly)
     ST.db.events[id] = ev
     if Store.onAdd and not localOnly then Store.onAdd(id, ev) end
     if ST.Week and not localOnly then ST.Week.Warn(ev) end
-    return id, ev, ST.Scoring.EvaluateBadges()
+    return id, ev, ST.Achieve.Evaluate()
 end
 
 
@@ -237,7 +237,7 @@ function Store.Ranked(tallies, casters)
     return rows
 end
 
--- Stats about the summons a given caster has cast, used by the badge rules.
+-- Stats about the summons a given caster has cast, used by the achievements (Achieve.lua).
 function Store.Stats(caster)
     local s = { cast = 0, kinds = {}, distinctMaps = 0, points = 0 }
     local maps = {}

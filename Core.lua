@@ -2,7 +2,7 @@ local ADDON, ST = ...
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.30.0"
+ST.version = "0.31.0"
 
 local DB_VERSION = 1
 
@@ -205,9 +205,9 @@ frame:SetScript("OnEvent", ST.Safe("the login", function(_, event, arg1)
         -- Remember what the previous session left behind for the save/reload test.
         ST.previousToken = ST.db.harness.token
     elseif event == "PLAYER_LOGIN" then
-        -- this character's badges, worked out quietly now if it has none kept yet (Scoring.Badges), so its next summons is
-        -- what announces a new one; at login, once the character and the rest of the addon are ready
-        if ST.Store.me() then ST.Guard("the badges at login", ST.Scoring.Badges, ST.Store.me()) end
+        -- this character's achievements, worked out quietly now if it has none kept yet or the list has grown (Achieve.Badges),
+        -- so its next summons is what announces a new one; at login, once the character and the rest of the addon are ready
+        if ST.Store.me() then ST.Guard("the achievements at login", ST.Achieve.Badges, ST.Sync.myName()) end
         if ST.OnLogin then ST.OnLogin() end
         print_("loaded v" .. ST.version .. ". /sc for commands.")
     end
@@ -298,7 +298,7 @@ function commands.fake(rest)
     for i = 2, math.min(#w, 3) do assistants[#assistants + 1] = w[i] end
     local ev, badges = ST.AddFake(w[1], assistants)
     print_(string.format("fake summon saved: %s in %s (+%d, %s)", ev.target, ev.subzone, ev.points, ev.kind))
-    for _, name in ipairs(badges) do print_("|cffffd100Badge earned:|r " .. name) end
+    ST.Achieve.Say(badges)
 end
 
 -- Opens the assistants prompt without a party: /sc fakeprompt <target> <member> <member> ...
@@ -430,19 +430,17 @@ function commands.tally()
     end
 end
 
-function commands.badges()
+-- The achievements: how many are earned, the newest and the nearest; `all` lists every one with its progress.
+function commands.achievements(rest)
     if ST.Gag.Blocked() then return end
-    for _, b in ipairs(ST.Scoring.badges) do
-        local got = ST.Scoring.Badges()[b.id]
-        print_(string.format("%s %s%s", got and "|cff33ff66[x]|r" or "[ ]", b.name,
-            got and (" (" .. fmtTime(got.earned) .. ")") or (b.how and (": " .. b.how) or "")))
-    end
+    for _, line in ipairs(ST.Achieve.Lines(rest == "all")) do print_(line) end
 end
+commands.achievement, commands.ach, commands.badges = commands.achievements, commands.achievements, commands.achievements
 
 function commands.undo()
     local last = ST.Store.RemoveLast()
     if last then
-        print_(string.format("removed %s -> %s (badges already earned are kept)", last.ev.caster, last.ev.target))
+        print_(string.format("removed %s -> %s (achievements already earned are kept)", last.ev.caster, last.ev.target))
     else
         print_("nothing to undo")
     end
@@ -748,9 +746,9 @@ end
 
 -- What a player needs: five lines. /sc help all has the rest (design/lenses.md, Interface).
 local HELP_SHORT = {
-    "/sc - the Summon Core window: the party's tally and badges, Zennit's answers, the log, the story and the tools    /sc tour - the Index shows you round it",
+    "/sc - the Summon Core window: the party's tally and achievements, Zennit's answers, the log, the story and the tools    /sc tour - the Index shows you round it",
     "/sc rules - the rules of the race, with this week's live numbers    /sc week - how this week and the season stand (/sc week say tells the group, /sc week copy lets you paste it)",
-    "/sc tab - what is owed in silver    /sc cards - who holds a summon card    /sc titles - who leads the season's titles    /sc leaders - who has summoned Zennit, given him fish and hit him with snowballs most",
+    "/sc tab - what is owed in silver    /sc cards - who holds a summon card    /sc titles - who leads the season's titles    /sc achievements - what you have earned and what is near    /sc leaders - who has summoned Zennit, given him fish and hit him with snowballs most",
     "/sc report - how the race is going (/sc report copy opens it to paste into the group chat)    /sc seasons - the record of every finished season",
     "/sc help all - every command (the rest are for setting up, testing and Zennit)    /sc tips off - stop the Monday tip",
 }
@@ -761,7 +759,8 @@ local HELP = {
     "/sc - open the Summon Core window (everything below is also in it)    /sc help - the short list    /sc help all - this list",
     "/sc tour [step|skip] - a narrated tour of the window: the Index outlines each part as it talks about it (again: stops it). Until you have seen the intro, it plays first; skip goes straight to the tour",
     { "admin", "/sc test - diagnostics panel (/sc test ping <name>)" },
-    "/sc log [n] - recent summons    /sc tally - counts and points    /sc badges",
+    "/sc log [n] - recent summons    /sc tally - counts and points",
+    "/sc achievements [all] - your achievements: how many are earned, the newest, and the ones you are nearest to (all: every one, with its progress)",
     "/sc panel - open the window on the Party tab",
     { "admin", "/sc zenit - toggle Zennit test mode    /sc party - toggle party test mode" },
     "/sc writ - arm a writ for your next ritual on Zennit: if he declines that summons in the game, it costs him its points",

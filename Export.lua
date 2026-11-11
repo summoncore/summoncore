@@ -242,7 +242,7 @@ function Export.Apply(preview)
         local kind = r:match("^rejected") and "rejected" or r
         counts[kind] = counts[kind] + 1
     end
-    return counts, ST.Scoring.EvaluateBadges()
+    return counts, ST.Achieve.Evaluate()
 end
 
 ----------------------------------------------------------------------
@@ -300,7 +300,7 @@ local function doImport()
     window.importBtn:Disable()
     setStatus(string.format("Imported %d new and %d replaced; %d already known.", counts.added, counts.replaced,
         counts.kept), true)
-    for _, name in ipairs(badges) do ST.print("|cffffd100Badge earned:|r " .. name) end
+    ST.Achieve.Say(badges)
 end
 
 local function button(parent, text, width, x, onClick, y, style)
@@ -371,7 +371,7 @@ local function build()
         added = added + 1
         local i = (added - 1) % #names + 1
         local ev, badges = ST.AddFake(names[i], { names[i % #names + 1], names[(i + 1) % #names + 1] })
-        for _, name in ipairs(badges) do ST.print("|cffffd100Badge earned:|r " .. name) end
+        ST.Achieve.Say(badges)
         setStatus(string.format("Added test summon: %s (%s, +%d). The log now holds %d.", ev.target, ev.kind,
             ev.points, ST.Store.Count()), true)
     end, 44)

@@ -31,8 +31,8 @@ function Reset.Apply(stamp)
     end
     ST.db.resetAt = stamp
     ST.db.badges = {}
-    -- badges go too (Scoring.Badges): this character starts again with none, and any other is worked out afresh at its login
-    ST.db.badgesBy = { [ST.Sync.myName()] = {} }
+    -- the achievements go too: every character's are worked out afresh (this one's below, any other at its login)
+    ST.db.badgesBy, ST.db.badgesRules = {}, {}
     -- A tombstone of a summons the reset removes is redundant (the mark refuses it), but one of a summons made after the mark is
     -- not: this reset may be accepted long after its stamp, and a peer may still hold that summons. The id carries the summons'
     -- time ("<author>-<time>[-n]").
@@ -42,6 +42,9 @@ function Reset.Apply(stamp)
     end
     ST.db.cards = nil   -- a card's punches are counted from the summons, so with them gone every card would be full again
     if ST.db.settings then ST.db.settings.weekSeen, ST.db.settings.weekAnnounced = nil, nil end
+    -- what a reset does not wipe still stands (the fish, the snowballs, the story watched): this character takes those
+    -- achievements back quietly, and starts again on the ones counted from the log
+    ST.Achieve.Badges()
     if ST.Hub then ST.Hub.Refresh() end
     return removed
 end
