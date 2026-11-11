@@ -10,7 +10,7 @@ setfenv(1, ST.env)
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.32.2"
+ST.version = "0.32.3"
 
 local DB_VERSION = 1
 
@@ -461,13 +461,25 @@ function commands.sync()
     ST.Sync.Status()
 end
 
--- /sc wire [on|off]: every message to and from other clients, in plain words in chat (Sync.Tap). Off at each login.
+-- /sc wire: the messages Summon Core clients send each other (Sync.Tap), an admin tool. Alone it opens the Sync tab, where the
+-- recorder's list is; /sc wire record [on|off] switches the recorder, /sc wire chat [on|off] says each message in chat.
 function commands.wire(rest)
+    if not ST.IsAdmin() then return print_("that is an admin tool") end
+    local what, arg = rest:match("^(%S*)%s*(%S*)")
     local want -- nil: the other way round
-    if rest == "on" then want = true elseif rest == "off" then want = false end
-    local on = ST.Sync.ToggleWire(want)
-    print_(on and "wire on: every Summon Core message sent (>>) and received (<<) is shown here. /sc wire again turns it off."
-        or "wire off")
+    if arg == "on" then want = true elseif arg == "off" then want = false end
+    if what == "chat" then
+        local on = ST.Sync.ToggleWire(want)
+        return print_(on and "wire chat on: every Summon Core message sent (>>) and received (<<) is said here. /sc wire chat again: off."
+            or "wire chat off")
+    elseif what == "record" then
+        if want == nil then want = not ST.Sync.Recording() end
+        local on = ST.Sync.SetRecording(want)
+        if ST.Hub then ST.Hub.Refresh() end
+        return print_(on and ("wire recorder on: the last " .. ST.Sync.WIRE_MAX .. " messages are kept in memory (not saved) for the Sync tab.")
+            or "wire recorder off")
+    end
+    ST.Hub.Open("sync")
 end
 
 function commands.export()
@@ -786,7 +798,7 @@ local HELP = {
     "/sc where - current map, subzone and how it scores    /sc places - what every place is worth, checked against the game",
     { "admin", "/sc fake <target> [h1 h2] - add a test summon    /sc fakeprompt <target> <members...>" },
     "/sc sync - say hello to party/guild and show sync status",
-    "/sc wire - watch the messages Summon Core clients send each other, in plain words (again: off)",
+    { "admin", "/sc wire - the messages Summon Core clients send each other, on the Sync tab (/sc wire record [on|off] keeps them; /sc wire chat [on|off] says them in chat)" },
     { "admin", "/sc synctest - run the merge self-test" },
     "/sc export / /sc import - copy-paste strings of the summon log",
     "/sc intro [scene] - play the illustrated intro (/sc intro check tests its sound files; /sc intro g2 group shows a chapter to the group; /sc intro previously plays this season's chapters back to back)    /sc welcome - the newcomer's welcome again",

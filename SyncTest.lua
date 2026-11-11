@@ -4264,14 +4264,20 @@ add("a tombstone a peer sends is stamped with the wall clock, as the caster's ow
     return good, string.format("caster's %s, peer's %s, now %d", tostring(mine), tostring(theirs), time())
 end)
 
-add("the wire (/sc wire) says each message in plain words, and is quiet when off or for our own echo", function()
+add("the wire (/sc wire) says each message in plain words, is quiet when off or for our own echo, and records for the admin", function()
     local a = newClient("Alpha")
-    local printed, out, realPrint, realWire = {}, {}, ST.print, Sync.wire
+    local printed, out = {}, {}
+    local real = { print = ST.print, wire = Sync.wire, log = Sync.wireLog, max = Sync.WIRE_MAX, onWire = Sync.onWire, admin = ST.IsAdmin }
     ST.print = function(text) printed[#printed + 1] = text end
-    local ok, err = pcall(function()
+    local admin = true
+    ST.IsAdmin = function() return admin end
+    Sync.onWire = nil
+    local ok, err = pcall(with, a, function()
         local rec = "1~E~" .. Sync.Encode("Alpha-" .. BASE, { caster = "Alpha", target = "Zennit", assistants = { "Cy", "Di" },
             mapID = 1436, subzone = "Sentinel Hill", time = BASE, wrote = BASE, confirmed = true })
+        -- chat: off says nothing; on says each message
         Sync.wire = false
+        Sync.ClearWire()
         Sync.Tap("out", "PARTY", nil, rec, true)
         Sync.wire = true
         Sync.Tap("out", "PARTY", nil, rec, true)
@@ -4279,19 +4285,38 @@ add("the wire (/sc wire) says each message in plain words, and is quiet when off
         Sync.Tap("in", "WHISPER", "Bo-Realm", "1~R~" .. BASE, "asked")
         Sync.Tap("out", "WHISPER", "Bo", "1~H~3|" .. BASE .. "|0.32.1|0|0|0||0badf00d", false)
         Sync.Tap("in", "GUILD", "Cy", "9~Z~whatever", "ignored:version")      -- a kind it does not know: shown as it came
+        out.recordedWhileOff = #Sync.wireLog                                   -- chat alone keeps nothing
         Sync.wire = false
-        with(a, function() Sync.Hello("WHISPER", "Bo") Sync.Pump(1) end)       -- a real hello, as it goes out
+        Sync.Hello("WHISPER", "Bo")
+        Sync.Pump(1)                                                           -- a real hello, as it goes out
         out.describedHello = Sync.Describe(a.out[1] and a.out[1].payload or "")
+        -- the recorder: the admin's only, and the last WIRE_MAX messages
+        out.on = Sync.SetRecording(true)
+        Sync.WIRE_MAX = 3
+        for n = 1, 5 do Sync.Tap("in", "PARTY", "Cy", "1~V~g" .. n, "noted") end
+        Sync.Tap("in", "PARTY", "Alpha", rec, "ignored:self")
+        out.kept, out.oldest = #Sync.wireLog, Sync.wireLog[1] and Sync.wireLog[1].payload
+        out.line = Sync.wireLog[3] and Sync.WireLine(Sync.wireLog[3])
+        admin = false                                                          -- a player: the switch does nothing for them
+        out.player = Sync.Recording()
+        Sync.Tap("in", "PARTY", "Cy", "1~V~g9", "noted")
+        out.keptAfter = #Sync.wireLog
+        admin = true
+        Sync.SetRecording(false)
+        out.off = Sync.Recording()
     end)
-    ST.print, Sync.wire = realPrint, realWire
+    ST.print, Sync.wire, Sync.wireLog, Sync.WIRE_MAX, Sync.onWire, ST.IsAdmin = real.print, real.wire, real.log, real.max, real.onWire, real.admin
     if not ok then return false, "ERROR " .. tostring(err) end
-    local all = table.concat(printed, "\n")
     local good = #printed == 4 and printed[1]:find(">> PARTY", 1, true) and printed[1]:find("new summons: Alpha summoned Zennit (helpers: Cy, Di)", 1, true)
         and printed[2]:find("<< Bo-Realm via whisper", 1, true) and printed[2]:find("request: send me everything after", 1, true)
         and printed[2]:find("[asked]", 1, true) and printed[3]:find("whisper to Bo", 1, true) and printed[3]:find("game refused it", 1, true)
         and printed[3]:find("hello: 3 summons", 1, true) and printed[4]:find("Z whatever (protocol 9)", 1, true)
-        and out.describedHello:find("^H hello: ") ~= nil
-    return good and true or false, string.format("%d lines: %s | %s", #printed, all:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):sub(1, 300), tostring(out.describedHello))
+        and out.recordedWhileOff == 0 and out.describedHello:find("^H hello: ") ~= nil
+        and out.on == true and out.kept == 3 and out.oldest == "1~V~g3" and out.line and out.line:find("showing the group story chapter g5", 1, true)
+        and out.player == false and out.keptAfter == 3 and out.off == false
+    return good and true or false, string.format("%d lines, recorded while off %s, hello %s; kept %s from %s, player records %s (%s), off %s",
+        #printed, tostring(out.recordedWhileOff), tostring(out.describedHello), tostring(out.kept), tostring(out.oldest),
+        tostring(out.player), tostring(out.keptAfter), tostring(out.off))
 end)
 -- ===== [end tests:LOG] =====
 

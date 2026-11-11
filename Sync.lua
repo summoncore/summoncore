@@ -1260,10 +1260,28 @@ end
 -- Wiring
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
--- The wire (/sc wire): every message this client sends or receives, said in chat in plain words as it goes. Off at login; it
--- is for watching how clients talk to each other, and it can be busy (a newcomer's catch-up is hundreds of B messages).
+-- The wire: every message this client sends or receives, for watching how clients talk to each other. An admin tool, in two
+-- parts, each switched on its own: the recorder keeps the last WIRE_MAX messages in memory (never saved: gone at /reload) for
+-- the Sync tab's list, and chat says each one as it goes. The recorder's switch is saved (ST.db.settings.wireRecord), so it
+-- catches the hello at login; chat is off at each login, as it can be busy (a newcomer's catch-up is hundreds of B messages).
 ----------------------------------------------------------------------
-Sync.wire = false
+Sync.wire = false  -- chat
+Sync.wireLog = {}  -- the recorder: { time, dir, channel, who, payload, outcome }, oldest first
+Sync.WIRE_MAX = 300
+Sync.onWire = nil  -- called after each message recorded (the Sync tab, to refresh its list)
+
+function Sync.Recording()
+    return ST.db and ST.db.settings and ST.db.settings.wireRecord == true and ST.IsAdmin() or false
+end
+
+function Sync.SetRecording(on)
+    if ST.db and ST.db.settings then ST.db.settings.wireRecord = on and true or nil end
+    return Sync.Recording()
+end
+
+function Sync.ClearWire()
+    Sync.wireLog = {}
+end
 
 local function when(t)
     t = tonumber(t)
@@ -1316,22 +1334,48 @@ function Sync.Describe(payload)
     return typ .. " " .. text .. (tonumber(proto) ~= PROTO and (" (protocol " .. proto .. ")") or "")
 end
 
--- Says one message on the wire. dir "out": `who` is the target of a whisper (nil for a group or guild message), `outcome` true
--- or false for whether the game took it. dir "in": `who` is the sender, `outcome` what this client did with it (Sync.OnMessage:
--- "kept", "asked", "rejected:sender"...). Our own group and guild messages come back to us too; those are not said twice.
-function Sync.Tap(dir, channel, who, payload, outcome)
-    if not Sync.wire or (dir == "in" and outcome == "ignored:self") then return end
-    local where = channel == "WHISPER" and (dir == "out" and ("whisper to " .. tostring(who)) or "whisper") or tostring(channel)
-    local line
-    if dir == "out" then
-        line = string.format("|cff66ccff>> %s|r %s%s", where, Sync.Describe(payload), outcome == false and " |cffff4444(the game refused it)|r" or "")
-    else
-        local note = (type(outcome) == "string" and outcome ~= "") and (" |cff888888[" .. outcome .. "]|r") or ""
-        line = string.format("|cff99ff99<< %s via %s|r %s%s", ST.safe(who), where, Sync.Describe(payload), note)
-    end
-    ST.print("|cff888888[wire]|r " .. line)
+-- Where a message went or came from, in words: "PARTY", "whisper to Bo", "whisper".
+function Sync.WireWhere(e)
+    if e.channel ~= "WHISPER" then return tostring(e.channel) end
+    return e.dir == "out" and ("whisper to " .. tostring(e.who)) or "whisper"
 end
 
+-- What became of a message: for one sent, "refused" if the game would not take it; for one received, what this client did
+-- with it (Sync.OnMessage: "kept", "asked", "rejected:sender"...). nil when there is nothing to say.
+function Sync.WireOutcome(e)
+    if e.dir == "out" then return e.outcome == false and "the game refused it" or nil end
+    return (type(e.outcome) == "string" and e.outcome ~= "") and e.outcome or nil
+end
+
+-- One recorded message as a line of chat.
+function Sync.WireLine(e)
+    local outcome = Sync.WireOutcome(e)
+    if e.dir == "out" then
+        return string.format("|cff888888[wire]|r |cff66ccff>> %s|r %s%s", Sync.WireWhere(e), Sync.Describe(e.payload),
+            outcome and (" |cffff4444(" .. outcome .. ")|r") or "")
+    end
+    return string.format("|cff888888[wire]|r |cff99ff99<< %s via %s|r %s%s", ST.safe(e.who), Sync.WireWhere(e), Sync.Describe(e.payload),
+        outcome and (" |cff888888[" .. outcome .. "]|r") or "")
+end
+
+-- One message on the wire. dir "out": `who` is the target of a whisper (nil for a group or guild message), `outcome` true or
+-- false for whether the game took it. dir "in": `who` is the sender, `outcome` what this client did with it. Our own group
+-- and guild messages come back to us too; those are left out.
+function Sync.Tap(dir, channel, who, payload, outcome)
+    if dir == "in" and outcome == "ignored:self" then return end
+    local record, chat = Sync.Recording(), Sync.wire and ST.IsAdmin()
+    if not (record or chat) then return end
+    local e = { time = time(), dir = dir, channel = channel, who = who, payload = payload, outcome = outcome }
+    if record then
+        local log = Sync.wireLog
+        log[#log + 1] = e
+        while #log > Sync.WIRE_MAX do table.remove(log, 1) end
+        if Sync.onWire then pcall(Sync.onWire) end
+    end
+    if chat then ST.print(Sync.WireLine(e)) end
+end
+
+-- Chat on or off (nil: the other way round).
 function Sync.ToggleWire(on)
     if on == nil then on = not Sync.wire end
     Sync.wire = on and true or false

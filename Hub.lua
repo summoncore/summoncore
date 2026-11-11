@@ -69,7 +69,9 @@ local function bodyText(parent, x, y, width, height)
     return fs
 end
 
--- A scrolling table. columns = { { title, width, "LEFT"|"RIGHT" }, ... }; list.Set(rows) takes arrays of strings.
+-- A scrolling table. columns = { { title, width, "LEFT"|"RIGHT" }, ... }; list.Set(rows) takes arrays of strings, and
+-- list.Set(rows, emptyText, tips) a tooltip for each row too: tips[i] is a list of lines, the first the tooltip's title.
+-- list.sf is the scroll frame (list.sf.ScrollTo(y)).
 local function scrollList(parent, columns, bottomMargin)
     local list = { rows = {} }
     local xs, x = {}, 8
@@ -92,8 +94,19 @@ local function scrollList(parent, columns, bottomMargin)
     child:SetSize(x, 1)
     list.empty = T.Text(parent, 18, "dim")
     list.empty:SetPoint("CENTER", sf, "CENTER")
+    list.sf = sf
 
-    function list.Set(rows, emptyText)
+    local function showTip(hit)
+        local tip = list.tips and list.tips[hit.index]
+        if not tip then return end
+        GameTooltip:SetOwner(hit, "ANCHOR_CURSOR")
+        GameTooltip:SetText(tip[1], 1, 1, 1)
+        for i = 2, #tip do GameTooltip:AddLine(tip[i], 0.8, 0.8, 0.8, true) end
+        GameTooltip:Show()
+    end
+
+    function list.Set(rows, emptyText, tips)
+        list.tips = tips
         for i, row in ipairs(rows) do
             local r = list.rows[i]
             if not r then
@@ -112,9 +125,20 @@ local function scrollList(parent, columns, bottomMargin)
                 r[c]:SetText(row[c] or "")
                 r[c]:Show()
             end
+            if tips and not r.hit then -- the row's area, for its tooltip
+                r.hit = CreateFrame("Frame", nil, child)
+                r.hit:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H)
+                r.hit:SetSize(x, ROW_H)
+                r.hit.index = i
+                r.hit:EnableMouse(true)
+                r.hit:SetScript("OnEnter", showTip)
+                r.hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
+            if r.hit then r.hit:SetShown(tips ~= nil) end
         end
         for i = #rows + 1, #list.rows do
             for _, fs in ipairs(list.rows[i]) do fs:Hide() end
+            if list.rows[i].hit then list.rows[i].hit:Hide() end
         end
         child:SetHeight(math.max(1, #rows * ROW_H + 4))
         list.empty:SetText(#rows == 0 and (emptyText or "Nothing here yet.") or "")
@@ -634,6 +658,120 @@ local function buildStory(f)
     end
 end
 
+-- The wire, under the Sync tab's buttons (the admin's only): the messages Sync.Tap recorded, newest at the bottom, with
+-- switches for the recorder and for chat, a filter by direction, catch-up records hidden or shown, pause and clear. A row's
+-- tooltip has the whole message in words and as it went over the wire.
+local WIRE_WAYS = { { "all", "ALL" }, { "out", "SENT" }, { "in", "RECEIVED" } }
+
+local function buildWire(f)
+    local Sync = ST.Sync
+    local view = { way = 1, hideBatch = false, paused = false, shownCount = 0 }
+    local x = 16
+    local function control(text, width, onClick)
+        local b = button(f, text, x, 0, width, onClick)
+        x = x + width + 6
+        return b
+    end
+    label(f, "WIRE", x, -3, "amber")
+    x = x + 56
+    local refresh
+    local record = control("RECORD", 130, function()
+        Sync.SetRecording(not Sync.Recording())
+        refresh()
+    end)
+    local chat = control("CHAT", 100, function()
+        Sync.ToggleWire()
+        refresh()
+    end)
+    local way = control("ALL", 110, function()
+        view.way = view.way % #WIRE_WAYS + 1
+        refresh()
+    end)
+    local batch = control("CATCH-UP", 140, function()
+        view.hideBatch = not view.hideBatch
+        refresh()
+    end)
+    local pause = control("PAUSE", 84, function()
+        view.paused = not view.paused
+        refresh()
+    end)
+    control("CLEAR", 70, function()
+        Sync.ClearWire()
+        refresh()
+    end)
+    local status = label(f, "", 16, -30, "dim")
+    status:SetWidth(740)
+    local box = CreateFrame("Frame", nil, f)
+    box:SetPoint("TOPLEFT", 0, -50)
+    box:SetPoint("BOTTOMRIGHT")
+    local list = scrollList(box, { { "Time", 80 }, { "Way", 190 }, { "Who", 120 }, { "Message", 350 } })
+
+    local function wanted(e)
+        local w = WIRE_WAYS[view.way][1]
+        if w ~= "all" and e.dir ~= w then return false end
+        if view.hideBatch and e.payload:match("^%d+~B~") then return false end
+        return true
+    end
+
+    refresh = function()
+        local recording, log = Sync.Recording(), Sync.wireLog
+        record:SetText(recording and "RECORD: ON" or "RECORD: OFF")
+        record:SetSelected(recording)
+        chat:SetText(Sync.wire and "CHAT: ON" or "CHAT: OFF")
+        chat:SetSelected(Sync.wire)
+        way:SetText(WIRE_WAYS[view.way][2])
+        batch:SetText(view.hideBatch and "CATCH-UP OFF" or "CATCH-UP ON")
+        pause:SetText(view.paused and "RESUME" or "PAUSE")
+        pause:SetSelected(view.paused)
+        local sent = 0
+        for _, e in ipairs(log) do if e.dir == "out" then sent = sent + 1 end end
+        local state = recording and "recording" or T.Paint("amber", "not recording: RECORD keeps the next ones")
+        if view.paused then
+            state = T.Paint("amber", string.format("paused, %d new since", math.max(0, #log - view.shownCount)))
+        end
+        status:SetText(string.format("%d of the last %d kept (%d sent, %d received) · %s · in memory only, gone at /reload",
+            #log, Sync.WIRE_MAX, sent, #log - sent, state))
+        if view.paused then return end
+        view.shownCount = #log
+        local rows, tips = {}, {}
+        for _, e in ipairs(log) do
+            if wanted(e) then
+                local outcome = Sync.WireOutcome(e)
+                local described = Sync.Describe(e.payload)
+                local refused = e.dir == "out" and outcome
+                rows[#rows + 1] = {
+                    T.Paint("dim", date("%H:%M:%S", e.time)),
+                    e.dir == "out" and T.Paint("cyan", ">> " .. Sync.WireWhere(e)) or T.Paint("green", "<< " .. Sync.WireWhere(e)),
+                    e.dir == "in" and who(ST.safe(e.who)) or "",
+                    described .. (refused and T.Paint("red", "  (" .. outcome .. ")") or outcome and T.Paint("dim", "  [" .. outcome .. "]") or ""),
+                }
+                local tip = { (e.dir == "out" and "Sent " or "Received ") .. date("%H:%M:%S", e.time) .. " · " .. Sync.WireWhere(e)
+                    .. (e.dir == "in" and (" from " .. ST.safe(e.who)) or ""), described }
+                if outcome then tip[#tip + 1] = (e.dir == "out" and "" or "This client: ") .. outcome end
+                tip[#tip + 1] = "On the wire: " .. tostring(e.payload)
+                tips[#tips + 1] = tip
+            end
+        end
+        local sf = list.sf
+        local atBottom = (sf:GetVerticalScrollRange() or 0) - (sf:GetVerticalScroll() or 0) < ROW_H * 2
+        list.Set(rows, recording and "Nothing yet: SAY HELLO NOW sends a hello, and the replies show here."
+            or "RECORD keeps the messages this client sends and receives from now on.", tips)
+        if atBottom then C_Timer.After(0, function() sf.ScrollTo(math.huge) end) end -- follow the newest, unless scrolled up
+    end
+
+    -- each message recorded: refresh, at most twice a second, and only while the list is on screen
+    local pending = false
+    Sync.onWire = function()
+        if pending then return end
+        pending = true
+        C_Timer.After(0.5, function()
+            pending = false
+            if f:IsVisible() then ST.Guard("the wire", refresh) end
+        end)
+    end
+    return function() refresh() end
+end
+
 local function buildSync(f)
     local info = bodyText(f, 16, -10, 740, 120)
     local out = bodyText(f, 16, -250, 740, 140)
@@ -648,17 +786,24 @@ local function buildSync(f)
     local importExport = button(f, "IMPORT / EXPORT", 348, -140, 160, function() ST.Export.Open("import") end)
     label(f, "Sync shares your summons with other Summon Core users in your party, raid and guild.\n" ..
         "'Say hello now' announces your log size so anyone with newer or older entries swaps them with you.", 16, -184):SetWidth(740)
+    local wire = CreateFrame("Frame", nil, f) -- the admin's only
+    wire:SetPoint("TOPLEFT", 0, -234)
+    wire:SetPoint("BOTTOMRIGHT")
+    local refreshWire = buildWire(wire)
     return function()
         local admin = ST.IsAdmin()
         selfTest:SetShown(admin) -- an admin tool
         importExport:ClearAllPoints()
         importExport:SetPoint("TOPLEFT", admin and 348 or 182, -140)
+        wire:SetShown(admin)
+        out:SetShown(not admin) -- the wire has that room on the admin's tab
+        if admin then refreshWire() end
         local st = ST.Sync.state
         local channels = ST.Sync.channels()
         info:SetText(string.format(
             "Summons in your log: %s\nLatest: %s\nQueued to send: %s\nChannels right now: %s",
             T.Paint("amber", ST.Store.Count()), ST.Store.Latest() > 0 and fmtTime(ST.Store.Latest()) or "never",
-            T.Paint("amber", #st.queue),
+            T.Paint("amber", #st.queue + #(st.bulk or {})),
             #channels > 0 and T.Paint("cyan", table.concat(channels, ", ")) or T.Paint("dim", "none (not in a group or guild)")))
     end
 end
