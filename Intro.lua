@@ -1,7 +1,8 @@
 -- Intro: /sc intro plays "Zennit and the Index", an illustrated intro. Each scene is a 3-frame flipbook
 -- (Media\intro_<n>, a 2048x1024 sheet of 1024x512 cells) flipped about six times a second, narrated, with a
 -- quiet synth music bed. Key phrases are typed out over the picture, in sync with the narration, with
--- beeps and clicks (the full text is available behind the Text button). Rebuild the art with
+-- beeps and clicks (the full text is available behind the Text button). In the neon look the picture is built up as it
+-- plays (Intro.BuildUp). Rebuild the art with
 -- tools\intro\render_intro.ps1 and the audio and cue timings with tools\intro\build_audio.ps1.
 local ADDON, ST = ...
 local Intro = {}
@@ -216,6 +217,7 @@ local onDone -- runs once if the chapter plays to its end (Intro.Play's whenDone
 local fromTop -- this play of the intro started at its first scene, so reaching its last counts as having seen it
 local queue = {} -- chapters still to play after this one ("previously on"); emptied when the viewer closes
 local pictureH, pictureW, buttonsWidth = 300, 533, 700
+local covers = {} -- the dark covers of the build-up (Intro.BuildUp), made as they are needed
 local t, playing, shownScene, shownFrame, lastCue = 0, false, 0, -1, nil
 
 local function fmt(sec)
@@ -267,6 +269,37 @@ function Intro.HighlightAt(list, rel)
     local elapsed = rel - list[index].t
     if elapsed > HIGHLIGHT_HOLD then return nil end
     return index, elapsed
+end
+
+-- The build-up (the neon look only): a picture is not simply shown, it is plotted. The whole of it is drawn on from the top
+-- as its scene opens, and a part the narrator has yet to mention stays dark until just before it is, then is drawn on too.
+-- Both move in steps, not smoothly, as an old display would. Returns how much of the picture is still dark (1 to 0, from the
+-- bottom up) and a list of { x, y, w, h, hidden } for the parts still dark (hidden: 1 to 0, in the 960x540 picture).
+local WIPE, PART_LEAD, PART_WIPE, STEPS = 0.9, 0.5, 0.4, 8
+local PART_MIN, PART_MAX = 1.5, 0.4 -- a part mentioned in the first moments, or bigger than this share of the picture, is not held back
+local function stepped(frac)
+    return math.max(0, math.min(1, math.ceil(frac * STEPS) / STEPS))
+end
+function Intro.BuildUp(list, rel)
+    local wipe = stepped(1 - rel / WIPE)
+    local parts, seen = {}, {}
+    for _, h in ipairs(list or {}) do
+        local key = h.x .. "," .. h.y .. "," .. h.w .. "," .. h.h
+        if not seen[key] then -- its first mention is what reveals it
+            seen[key] = true
+            if h.t >= PART_MIN and h.w * h.h <= PART_MAX * 960 * 540 then
+                local hidden = stepped((h.t - PART_LEAD + PART_WIPE - rel) / PART_WIPE)
+                if hidden > 0 then parts[#parts + 1] = { x = h.x, y = h.y, w = h.w, h = h.h, hidden = hidden } end
+            end
+        end
+    end
+    return wipe, parts
+end
+
+-- How bright the highlight box is `elapsed` seconds after its subject is mentioned: it flickers on, as a tube does, then holds.
+function Intro.Flash(elapsed)
+    if elapsed < 0.6 then return math.floor(elapsed * 12) % 2 == 0 and 1 or 0.25 end
+    return 0.8
 end
 
 -- How much of a phrase has been typed after `elapsed` seconds (at least one character), at `cps` characters
@@ -374,7 +407,10 @@ local function show(sec)
         lastLine = nil
         if playing then
             -- the intro seen, once, when it is played from the top to its last scene: the tour's jokes lean on it
-            if fromTop and si == lastOf[1] and not ST.db.settings.introWatched then ST.db.settings.introWatched = true end
+            if fromTop and si == lastOf[1] and not ST.db.settings.introWatched then
+                ST.db.settings.introWatched = true
+                ST.Achieve.Soon()
+            end
             playClip(si, true)
             if posOf(si) > 1 and not ST.db.settings.introMute then pcall(PlaySoundFile, SFX .. "sfx_pop.ogg", "SFX") end
         end
@@ -415,10 +451,43 @@ local function show(sec)
         glow:ClearAllPoints()
         glow:SetPoint("TOPLEFT", picture, "TOPLEFT", r.x * sx, -r.y * sy)
         glow:SetSize(r.w * sx, r.h * sy)
-        glow:SetAlpha(math.min(1, boxElapsed / 0.15) * (0.7 + 0.3 * math.sin(boxElapsed * 8)) * fade)
+        glow:SetAlpha(Intro.Flash(boxElapsed) * fade)
         glow:Show()
     else
         glow:Hide()
+    end
+
+    -- the build-up: dark covers over what has not been drawn yet, each with a bright line where the drawing has got to
+    local wipe, parts = 0, nil
+    if look() == "lines" then wipe, parts = Intro.BuildUp(boxes, rel) end
+    local used = 0
+    local function cover(x, y, w, h, hidden)
+        used = used + 1
+        local c = covers[used]
+        if not c then
+            c = { dark = frame:CreateTexture(nil, "ARTWORK", nil, 2), edge = frame:CreateTexture(nil, "ARTWORK", nil, 3) }
+            c.dark:SetColorTexture(0, 0, 0, 1)
+            c.edge:SetColorTexture(0.75, 1, 0.8, 0.9)
+            covers[used] = c
+        end
+        local top = y + h * (1 - hidden) -- drawn from the top down: what is left dark is the bottom of it
+        c.dark:ClearAllPoints()
+        c.dark:SetPoint("TOPLEFT", picture, "TOPLEFT", x, -top)
+        c.dark:SetSize(w, math.max(1, h * hidden))
+        c.dark:Show()
+        c.edge:ClearAllPoints()
+        c.edge:SetPoint("TOPLEFT", picture, "TOPLEFT", x, -top)
+        c.edge:SetSize(w, 2)
+        c.edge:SetShown(hidden < 1)
+    end
+    if wipe > 0 then cover(0, 0, pictureW, pictureH, wipe) end
+    for _, p in ipairs(parts or {}) do
+        local sx, sy = pictureW / 960, pictureH / 540
+        cover(p.x * sx, p.y * sy, p.w * sx, p.h * sy, p.hidden)
+    end
+    for i = used + 1, #covers do
+        covers[i].dark:Hide()
+        covers[i].edge:Hide()
     end
 
     local mode = ST.db.settings.introTextMode or "full"

@@ -156,7 +156,7 @@ local function report(ev, badges)
             ST.Week.WritsLeft(ST.Week.Start(ev.time)), ev.points, ev.points == 1 and "" or "s"))
     end
     if zenit then return end -- points and badges are hidden on Zennit's client
-    for _, name in ipairs(badges) do ST.print("|cffffd100Badge earned:|r " .. name) end
+    ST.Achieve.Say(badges)
 end
 
 -- Saves an event, asking the caster about assistants when the roster is unclear.

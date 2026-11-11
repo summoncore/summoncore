@@ -3,7 +3,7 @@
 ## Notes: Logs every Ritual of Summoning and shares it with your friends: the weekly race to summon Zennit, and the story of Zennit and the Index
 ## Author: Aaron
 ## X-Curse-Project-ID: 1731543
-## Version: 0.30.0
+## Version: 0.32.0
 ## IconTexture: Interface\AddOns\summoncore\Media\icon
 ## SavedVariables: SummonTrackerDB
 
@@ -32,6 +32,7 @@ Silver.lua
 Fish.lua
 Snowball.lua
 Leaders.lua
+Achieve.lua
 Probe.lua
 Reset.lua
 Hub.lua

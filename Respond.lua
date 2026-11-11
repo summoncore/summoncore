@@ -647,7 +647,7 @@ function Respond.OnResponse(id, ev, resp, before)
         if ST.Check then ST.Check.Seen("d-postcard", "a postcard was filed") end
     end
     printWeek(ev, false)
-    ST.Scoring.Announce() -- his answer may have earned me a badge (a tipped roll, a clean tab, a card used up)
+    ST.Achieve.Announce() -- his answer may have earned me an achievement (a tipped roll, a clean tab, a card used up)
     if ST.Hub then ST.Hub.Refresh() end
     if diceDlg and diceCurrent and diceCurrent.id == id then
         diceDlg.text:SetText(line or "")

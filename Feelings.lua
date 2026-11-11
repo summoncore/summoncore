@@ -19,6 +19,7 @@ function Feelings.Answer(week, n)
     ST.Sync.PutFeeling(ST.Sync.myName(), week, a.role, n) -- Zennit's and the admin's own answers count too
     ST.Sync.SendFeeling(week, a)
     ST.print("The Index has filed your opinion. Thank you. It will not be read aloud.")
+    ST.Achieve.Soon()
 end
 
 -- The week to ask about: last week, if it had any summons and has not been asked about; else nil.
