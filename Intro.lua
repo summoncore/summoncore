@@ -273,10 +273,12 @@ function Intro.HighlightAt(list, rel)
 end
 
 -- The build-up (the neon look only): a picture is not simply shown, it is plotted. The whole of it is drawn on from the top
--- as its scene opens, and a part the narrator has yet to mention stays dark until just before it is, then is drawn on too.
+-- as its scene opens, and a part the narrator has yet to mention stays dim (a faint outline) until just before it is, then is
+-- lit from the top down.
 -- Both move in steps, not smoothly, as an old display would. Returns how much of the picture is still dark (1 to 0, from the
 -- bottom up) and a list of { x, y, w, h, hidden } for the parts still dark (hidden: 1 to 0, in the 960x540 picture).
 local WIPE, PART_LEAD, PART_WIPE, STEPS = 0.9, 0.5, 0.4, 8
+local PART_DIM = 0.78 -- how dark a part waiting to be mentioned is: its outline shows faintly, as a tube not yet lit
 local PART_MIN, PART_MAX = 1.5, 0.4 -- a part mentioned in the first moments, or bigger than this share of the picture, is not held back
 local function stepped(frac)
     return math.max(0, math.min(1, math.ceil(frac * STEPS) / STEPS))
@@ -462,7 +464,7 @@ local function show(sec)
     local wipe, parts = 0, nil
     if look() == "lines" then wipe, parts = Intro.BuildUp(boxes, rel) end
     local used = 0
-    local function cover(x, y, w, h, hidden)
+    local function cover(x, y, w, h, hidden, dim)
         used = used + 1
         local c = covers[used]
         if not c then
@@ -475,6 +477,7 @@ local function show(sec)
         c.dark:ClearAllPoints()
         c.dark:SetPoint("TOPLEFT", picture, "TOPLEFT", x, -top)
         c.dark:SetSize(w, math.max(1, h * hidden))
+        c.dark:SetAlpha(dim or 1)
         c.dark:Show()
         c.edge:ClearAllPoints()
         c.edge:SetPoint("TOPLEFT", picture, "TOPLEFT", x, -top)
@@ -484,7 +487,7 @@ local function show(sec)
     if wipe > 0 then cover(0, 0, pictureW, pictureH, wipe) end
     for _, p in ipairs(parts or {}) do
         local sx, sy = pictureW / 960, pictureH / 540
-        cover(p.x * sx, p.y * sy, p.w * sx, p.h * sy, p.hidden)
+        cover(p.x * sx, p.y * sy, p.w * sx, p.h * sy, p.hidden, PART_DIM)
     end
     for i = used + 1, #covers do
         covers[i].dark:Hide()

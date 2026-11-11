@@ -10,7 +10,7 @@ setfenv(1, ST.env)
 
 ST.name = ADDON
 ST.prefix = "SUMMONCORE"
-ST.version = "0.32.3"
+ST.version = "0.32.4"
 
 local DB_VERSION = 1
 

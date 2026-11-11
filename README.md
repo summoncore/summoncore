@@ -3,7 +3,7 @@
 A Ritual of Summoning logger for WoW Forever (12.0 addon API). It records each summon you complete,
 credits the target and both assistants, shares the log with other users of the addon, and scores each
 summon by destination, then turns the scores into a weekly contest, a season and a story ("Zennit and the Index").
-Status: **v0.32.0, work in progress**. See [Status](#status) for what has and has
+Status: **v0.32.4, work in progress**. See [Status](#status) for what has and has
 not been tested in the live client.
 
 ## For friends
@@ -266,7 +266,7 @@ up new files). The art lives in `Media/intro_l<n>.blp` (lines) and `intro_<n>.bl
 
 - `tools/intro/render_intro.ps1 [-Style lines|storybook] [-SceneList 1,2]`: the picture sheets (`intro_l<n>.blp` for lines, `intro_<n>.blp` for storybook).
 - `tools/intro/render_intro.py [--style lines|storybook] [--scenes 1,2]`: the same sheets without Windows (Playwright's Chromium, numpy and Pillow; `render_shots.js` takes the stills). It reads the page patch and styles out of the `.ps1`, and both read `tools/intro/lines.css`, so they cannot drift apart.
-- **The neon look** (`lines`) is lettered and coloured after the picture entries of an old television guide to the galaxy: a colour for each subject (Zennit pink, the Index's book, form and clerk green, the Ritual a red ring round a dark disc with a bright yellow face, the Auditor orange, the hall a quiet blue, the party yellow), thick glowing tube lines, and labels in bold capitals. The colours are in `tools/intro/lines.css`. **It is also built up, not just shown** (`Intro.BuildUp`): each scene is drawn on from the top in steps as it opens, a part the narrator has yet to mention stays dark until just before it is and is then drawn on too (from the highlight boxes in `IntroCues.lua`; a part mentioned in the first moments or bigger than two fifths of the picture is not held back), and the highlight box flickers on like a tube before it holds. The storybook look is shown as before.
+- **The neon look** (`lines`) is lettered and coloured after the picture entries of an old television guide to the galaxy: a colour for each subject (Zennit pink, the Index's book, form and clerk green, the Ritual a red ring round a dark disc with a bright yellow face, the Auditor orange, the hall a quiet blue, the party yellow), thick glowing tube lines, and labels in bold capitals. The colours are in `tools/intro/lines.css`. **It is also built up, not just shown** (`Intro.BuildUp`): each scene is drawn on from the top in steps as it opens, a part the narrator has yet to mention stays dim, its outline showing faintly, until just before it is and is then drawn on too (from the highlight boxes in `IntroCues.lua`; a part mentioned in the first moments or bigger than two fifths of the picture is not held back), and the highlight box flickers on like a tube before it holds. The storybook look is shown as before.
 - `tools/intro/build_audio.ps1`: reads the narration takes in `tools/intro/narration/`, synthesises the music bed
   and the beeps, chirps and key clicks (`Media/sfx/`), mixes `Media/intro_<n>.ogg` (voice plus music, which ducks
   under the voice and swells in the pauses) and `Media/intro_<n>_voice.ogg` (voice only), and writes
@@ -409,6 +409,7 @@ textures must be `.tga` or `.blp` with power-of-two sides.
 | 0.30.0: the fish book (fish traded or mailed to Zennit, loose or wrapped in a present he opens), the leaderboard (summons of Zennit, fish, snowballs), snowballs thrown at Zennit | Checked outside the game only (the self-test and a headless run); which trade, mail and bag calls the 12.0 client lets an addon read, the present's item names, and the Snowball's spell ID (21343) are untested in this client |
 | 0.31.0: the achievements (46, with progress, from everything counted), snowballs kept per character, fish that arrive while a present is being opened no longer counted twice | Checked outside the game only (luacheck, the self-test and a headless run); the Party tab's Achievements section has not been seen in the client (check `s-fit`) |
 | 0.32.0: the intro's neon look redrawn (a colour for each subject, glowing lines, capital labels; all 58 sheets) and built up as it plays | Checked outside the game only: the sheets were written by the new `render_intro.py` (same size and header as before, and they decode), and the build-up by the self-test; neither has been seen in the client |
+| 0.32.4: a part of the intro's picture waiting to be mentioned is dimmed, not blacked out | The re-rendered sheets and the build-up were seen in the client (0.32.3); the dimming has not been |
 
 Known limits of the 12.0 API: no combat log, party data may be secret, no web requests. Secret values on
 other units (`UnitInRange`, `UnitHealth`) were confirmed, so the addon does not rely on them.
